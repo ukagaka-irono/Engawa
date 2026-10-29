@@ -78,9 +78,14 @@ export class GhostManager implements GhostEnv {
   /** 起動処理中のパッケージ (同じゴーストを二重に起動しないように) */
   private readonly booting = new Set<string>();
 
+  /**
+   * embedded: よそのページに埋め込んで使う (ななろだのおためし起動など。src/embed.ts)。
+   * サンプルのゴーストを入れず、自分では何も起動せず、ファイルのドロップも受けず、空のときの案内も出さない
+   */
   constructor(
     readonly desktop: HTMLElement,
     private readonly overlay: HTMLElement,
+    private readonly options: { embedded?: boolean } = {},
   ) {
     this.tray = overlay.querySelector<HTMLButtonElement>('.tray-button')!;
     this.characters = new CharacterLayer(desktop, (e) => this.openMenu(this.current, e.clientX, e.clientY));
@@ -105,6 +110,7 @@ export class GhostManager implements GhostEnv {
     requestAnimationFrame(loop);
 
     await this.refreshPackages();
+    if (this.options.embedded) return;
     if (!(await isPersistent())) {
       this.toasts.show('このブラウザでは保存領域が使えないため、インストールしたものや設定はページを閉じると消えます', {
         duration: 12_000,
@@ -330,7 +336,7 @@ export class GhostManager implements GhostEnv {
 
   /** ゴーストが1体も動いていないときの案内。インストール済みかどうかで文と操作を変える */
   private updateEmptyState(): void {
-    const show = this.ghosts.length === 0 && this.booting.size === 0;
+    const show = !this.options.embedded && this.ghosts.length === 0 && this.booting.size === 0;
     this.emptyState.hidden = !show;
     if (!show) return;
     const next = this.defaultGhosts();
@@ -377,8 +383,11 @@ export class GhostManager implements GhostEnv {
     return targets.filter((t): t is InstallTarget => !!t);
   }
 
-  /** 展開からインストールまで。展開に失敗したときも OnInstallFailure を送る */
-  async install(source: () => Promise<FileTree> | FileTree, name: string): Promise<void> {
+  /**
+   * 展開からインストールまで。展開に失敗したときも OnInstallFailure を送る。
+   * quiet なら、終わったことを通知しない (入れてすぐ起動するとき)。入れられなければ undefined
+   */
+  async install(source: () => Promise<FileTree> | FileTree, name: string, opts: { quiet?: boolean } = {}): Promise<InstallResult | undefined> {
     // イベントを受けるのは話せるゴーストだけ。ただし宛先 (accept が無いときの入れ先) は、あいさつ中でも選択中のゴースト
     const ghost = this.current?.alive && !this.current.leaving ? this.current : undefined;
     const focused = this.current?.alive ? this.current : undefined;
@@ -405,7 +414,7 @@ export class GhostManager implements GhostEnv {
         void ghost?.raise('OnInstallFailure', [e instanceof InstallError ? e.reason : 'extraction', msg]);
       }
       this.toasts.show(`「${name}」をインストールできませんでした: ${msg}`, { error: true });
-      return;
+      return undefined;
     }
     await this.refreshPackages();
     for (const k of [result.key, ...result.balloons.map((b) => b.key)]) this.balloons.delete(k);
@@ -446,7 +455,20 @@ export class GhostManager implements GhostEnv {
     const message = result.rerouted
       ? `${packageKindLabel(result.type)}「${result.name}」を「${where ?? result.accept}」にインストールしました`
       : `${packageKindLabel(result.type)}「${result.name}」をインストールしました`;
-    if (!played || actions.length || result.rerouted) this.toasts.show(message, { actions });
+    if (!opts.quiet && (!played || actions.length || result.rerouted)) this.toasts.show(message, { actions });
+    return result;
+  }
+
+  /** インストール済みのパッケージ (キー) のゴーストを起動する。起動できたら true */
+  async bootPackage(key: string): Promise<boolean> {
+    const meta = this.packages.find((p) => p.key === key && p.kind === 'ghost');
+    return !!meta && !!(await this.boot(meta, { kind: 'boot' }));
+  }
+
+  /** 保存領域を読み直す (よそから中身を消したあとなど) */
+  async reloadPackages(): Promise<void> {
+    await this.refreshPackages(true);
+    this.balloons.clear();
   }
 
   private async restart(ghost: Ghost): Promise<void> {
@@ -626,7 +648,7 @@ export class GhostManager implements GhostEnv {
   }
 
   /** すべて閉じる。次回はいま起動しているゴーストを全部起動する */
-  private async closeAll(): Promise<void> {
+  async closeAll(): Promise<void> {
     const keep = this.ghosts.map((g) => g.key);
     await Promise.all(this.ghosts.slice().map((g) => this.closeGhost(g)));
     settings.running = keep;
@@ -757,6 +779,18 @@ export class GhostManager implements GhostEnv {
       this.openMenu(this.current, r.right, bar.top, true);
     });
 
+    // 埋め込みでは、よそのページへのドロップを横取りしない
+    if (!this.options.embedded) this.bindDrop();
+
+    // 開発・連携用の簡易 API (SSTP の代わり)
+    (window as unknown as { engawa: unknown }).engawa = {
+      send: (script: string) => this.current?.playScript(script),
+      raise: (id: string, ...refs: string[]) => this.current?.raise(id, refs),
+      ghosts: () => this.ghosts.map((g) => g.name),
+    };
+  }
+
+  private bindDrop(): void {
     const dropHint = this.overlay.querySelector<HTMLElement>('.drop-hint')!;
     let depth = 0;
     window.addEventListener('dragenter', (e) => {
@@ -775,13 +809,6 @@ export class GhostManager implements GhostEnv {
       dropHint.hidden = true;
       if (e.dataTransfer) void this.onDrop(e.dataTransfer);
     });
-
-    // 開発・連携用の簡易 API (SSTP の代わり)
-    (window as unknown as { engawa: unknown }).engawa = {
-      send: (script: string) => this.current?.playScript(script),
-      raise: (id: string, ...refs: string[]) => this.current?.raise(id, refs),
-      ghosts: () => this.ghosts.map((g) => g.name),
-    };
   }
 }
 

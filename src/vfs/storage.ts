@@ -96,6 +96,17 @@ function inMemory(): Promise<boolean> {
   return modePromise;
 }
 
+/** IndexedDB を使わず、メモリだけに置く (よそのページに埋め込んだときのおためし起動など) */
+export function useMemoryStorage(): void {
+  modePromise = Promise.resolve(true);
+}
+
+/** メモリに置いたものを全部消す (おためし起動をやり直すとき) */
+export function clearMemoryStorage(): void {
+  memory.packages.clear();
+  memory.files.clear();
+}
+
 /** インストールしたものがページを閉じても残るか */
 export async function isPersistent(): Promise<boolean> {
   try {

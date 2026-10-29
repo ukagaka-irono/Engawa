@@ -35,6 +35,13 @@ interface DialogParts {
   titleId: string;
 }
 
+let dialogParent: HTMLElement | undefined;
+
+/** ダイアログを置く場所 (既定は body)。よそのページに埋め込むときは Engawa の入れ物の中に置き、そこの CSS を効かせる */
+export function setDialogParent(parent: HTMLElement): void {
+  dialogParent = parent;
+}
+
 /**
  * すべてのモーダルはここから作る。Windows のウィンドウのように、タイトルバーの見出しがダイアログの名前になり、
  * 右端の × で閉じる (Escape と同じ。Tab の順には入れない)。
@@ -54,7 +61,7 @@ function dialog(className: string, title: string, container: 'div' | 'form' = 'd
   close.tabIndex = -1;
   frame.append(titlebar, body, actions, close);
   root.appendChild(frame);
-  document.body.appendChild(root);
+  (dialogParent ?? document.body).appendChild(root);
   // <dialog> の無いブラウザ (Safari 15.3 以前) では dialog-polyfill で同じように動かす (見た目は .dialog-polyfilled)
   if (typeof HTMLDialogElement !== 'function') {
     dialogPolyfill.registerDialog(root);

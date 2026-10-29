@@ -53,10 +53,19 @@ function load(): Settings {
 export const settings: Settings = load();
 
 let timer: number | undefined;
+let persistent = true;
+
+/** 設定を保存しない (よそのページに埋め込んだときのおためし起動など)。既定の設定から始める */
+export function useTemporarySettings(): void {
+  persistent = false;
+  clearTimeout(timer);
+  Object.assign(settings, clone(DEFAULTS));
+}
 
 /** すぐに保存する。保存領域が使えなかったら false (設定はこのページを開いている間だけ有効) */
 export function saveSettingsNow(): boolean {
   clearTimeout(timer);
+  if (!persistent) return true;
   try {
     localStorage.setItem(KEY, JSON.stringify(settings));
     return true;

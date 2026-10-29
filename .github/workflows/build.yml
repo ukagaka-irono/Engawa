@@ -1,4 +1,4 @@
-# テストとビルド。開くだけで動く dist/index.html を成果物 (Artifacts) として残す。
+# テストとビルド。開くだけで動く dist/index.html と、埋め込み用の dist/engawa-embed.js を成果物 (Artifacts) として残す。
 # SHIORI の WebAssembly (src/assets/shiori/) はリポジトリに入っているので、Emscripten や Rust は使わない。
 name: Build
 
@@ -42,4 +42,11 @@ jobs:
         with:
           name: engawa-index-html
           path: dist/index.html
+          if-no-files-found: error
+
+      - name: 埋め込み用の dist/engawa-embed.js を成果物として残す
+        uses: actions/upload-artifact@v7
+        with:
+          name: engawa-embed-js
+          path: dist/engawa-embed.js
           if-no-files-found: error

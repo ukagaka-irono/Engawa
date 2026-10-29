@@ -29,6 +29,29 @@ npm run dev
 - **スマートフォン・タブレット**: キャラクターを長押しするとメニュー、2回続けてタップするとダブルクリックになります。
 - **キャラクターの移動**: ドラッグします (`seriko.alignmenttodesktop,free` のシェルは上下にも動かせます)。
 
+## よそのページに埋め込む (ななろだのおためし起動など)
+
+`npm run build` では、`dist/index.html` のほかに、よそのページに読み込ませて使う `dist/engawa-embed.js` もできます。
+[Ikagaka.demo](https://ikagaka.github.io/Ikagaka.demo/) と同じ名前の関数を出すので、Ikagaka でゴーストのおためし起動をしているページ (ななろだなど) で、その代わりに使えます。
+
+| 関数 | 内容 |
+|---|---|
+| `install_nar(file, dirpath, sakuraname, type)` | nar を入れる (起動はしない)。`type` が `"url"` なら `file` は URL、それ以外は Blob |
+| `boot_nanikamanager()` | 入れたゴーストを起動する |
+| `halt_nanikamanager()` | すべて閉じる |
+| `delete_storage()` / `delete_database()` | 入れたものを全部消す |
+
+読み込み終わると `window.onIkagakaReady()` を呼びます。どの関数も Promise を返します (`install_nar` は失敗しても reject せず `null`)。
+
+- キャラクターとバルーンはページの上に重なります。タスクバーは出さず、メニューはキャラクターの右クリック (タッチでは長押し) で開きます。
+- Engawa の CSS は `.engawa-embed` の中だけに効くようにしてあり、ページの見た目を変えません。キャラクターのいない所の入力 (スクロール・リンク・文字の選択) はページに届きます。
+- おためしなので、インストールしたものや設定は保存しません (ページを閉じると消えます)。IndexedDB も localStorage も使いません。
+- nar はページと同じサイトから読みます (よそのサイトの nar は、そのサイトが CORS を許していれば読めます)。
+
+ななろだでは、ゴーストのページが `/ikagaka/` 以下の Ikagaka のスクリプトを順に読み込み、`onIkagakaReady` を待ってから
+`delete_database()` → `install_nar(nar の URL, "", "", "url")` → `boot_nanikamanager()` と呼び、「終了」で `halt_nanikamanager()` を呼んでいます。
+読み込むスクリプトの一覧を `engawa-embed.js` 1本に変えれば、そのまま Engawa で動きます (呼び出し方は変えなくてかまいません)。
+
 ## 対応ブラウザ
 
 Firefox、Google Chrome (Android 版を含む)、Safari (iOS 12 以降)。Edge など Chrome と同じエンジンのブラウザでも動きます。
@@ -128,7 +151,8 @@ src/
   balloon/   バルーンのスキンと表示
   sakura/    さくらスクリプトの字句解析と再生
   ghost/     ゴースト本体 (イベント処理)、ベースウェア全体の管理、設定
-  ui/        メニュー (シェルの menu.* に対応)、ダイアログ、ヘルプ
+  ui/        メニュー (シェルの menu.* に対応)、ダイアログ、ヘルプ、画面の骨組み
+  embed.ts   よそのページに埋め込む版の入口 (Ikagaka.demo と同じ関数を出す。ビルドは vite.embed.config.ts)
 sample/      サンプルゴーストのテキスト (画像は tools/ で生成)
 tools/       サンプルゴーストの .nar を作るスクリプト
 native/      SHIORI を WebAssembly にするビルド (engines.mjs に各 SHIORI のソースのコミットと設定、shim/ に Windows の API などの代わり)
@@ -142,7 +166,7 @@ native/      SHIORI を WebAssembly にするビルド (engines.mjs に各 SHIOR
 | コマンド | 内容 |
 |---|---|
 | `npm run dev` | 開発サーバー |
-| `npm run build` | 型チェックと本番ビルド (開くだけで動く `dist/index.html` 1ファイル) |
+| `npm run build` | 型チェックと本番ビルド (開くだけで動く `dist/index.html` 1ファイルと、埋め込み用の `dist/engawa-embed.js`) |
 | `npm test` | 単体テスト |
 | `npm run sample` | サンプルゴーストの .nar を生成 |
 | `node native/build.mjs [名前...]` | SHIORI を WebAssembly にし直す (下記) |

@@ -35,15 +35,18 @@ function singleFile(): Plugin {
   };
 }
 
+// 対応ブラウザ: Firefox、Chrome (Android を含む)、Safari (iOS 12 以降)。vite.embed.config.ts も使う
+export const BUILD_TARGET = ['es2018', 'safari12', 'ios12', 'firefox78', 'chrome70'];
+export const CSS_TARGET = ['safari12', 'ios12', 'firefox78', 'chrome70'];
+
 export default defineConfig({
   base: './',
   assetsInclude: ['**/*.nar', '**/*.wasm.gz'],
   plugins: [singleFile()],
   build: {
-    // 対応ブラウザ: Firefox、Chrome (Android を含む)、Safari (iOS 12 以降)。
     // ?. や ?? などの新しい構文は Safari 12 が読める書き方に直す (足りない API は src/compat.ts で補う)
-    target: ['es2018', 'safari12', 'ios12', 'firefox78', 'chrome70'],
-    cssTarget: ['safari12', 'ios12', 'firefox78', 'chrome70'],
+    target: BUILD_TARGET,
+    cssTarget: CSS_TARGET,
     // サンプルゴーストなどの素材も data: URL として埋め込む
     assetsInlineLimit: Number.MAX_SAFE_INTEGER,
     cssCodeSplit: false,
