@@ -1,0 +1,6 @@
+charset,UTF-8
+type,ghost
+name,ゆかりとちゅん
+directory,engawa
+balloon.directory,engawa-balloon
+balloon.source.directory,balloon/engawa

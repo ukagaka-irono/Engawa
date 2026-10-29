@@ -1,0 +1,22 @@
+charset,UTF-8
+type,balloon
+name,縁側バルーン
+craftmanw,Engawa プロジェクト
+origin.x,28
+origin.y,16
+wordwrappoint.x,-28
+validrect.bottom,-14
+font.height,13
+font.color.r,61
+font.color.g,46
+font.color.b,34
+anchor.font.color.r,40
+anchor.font.color.g,96
+anchor.font.color.b,160
+cursor.style,square
+cursor.brush.color.r,244
+cursor.brush.color.g,214
+cursor.brush.color.b,186
+cursor.font.color.r,61
+cursor.font.color.g,46
+cursor.font.color.b,34

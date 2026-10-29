@@ -1,0 +1,12 @@
+charset,UTF-8
+type,ghost
+name,ゆかりとちゅん
+sakura.name,ゆかり
+sakura.name2,ゆかりさん
+kero.name,ちゅん
+craftman,Engawa Project
+craftmanw,Engawa プロジェクト
+homeurl,https://github.com/ukagaka-irono/Engawa
+shiori,shiori.js
+sakura.seriko.defaultsurface,0
+kero.seriko.defaultsurface,10

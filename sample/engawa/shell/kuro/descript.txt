@@ -1,0 +1,13 @@
+charset,UTF-8
+type,shell
+name,黒猫のゆかり
+craftmanw,Engawa プロジェクト
+seriko.use_self_alpha,1
+sakura.balloon.offsetx,24
+sakura.balloon.offsety,-70
+kero.balloon.offsetx,8
+kero.balloon.offsety,-40
+sakura.bindgroup1000.name,アクセサリ,リボン
+sakura.bindgroup1000.default,1
+sakura.bindgroup1001.name,アクセサリ,麦わら帽子
+sakura.bindgroup1001.default,0

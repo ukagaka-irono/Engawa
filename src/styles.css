@@ -1,0 +1,706 @@
+/* 共有の値はすべてここ (:root) に置く */
+:root {
+  color-scheme: light dark;
+
+  --font-ui: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', sans-serif;
+  --font-balloon: 'MS UI Gothic', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', sans-serif;
+  /* トレイボタンの「縁」の字 (favicon と同じ明朝) */
+  --font-brand: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --text-sm: 12px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --weight-medium: 500;
+  --weight-bold: 600;
+  --leading: 1.5;
+  --control-height: 36px;
+  --icon-button: 32px;
+  --tray-size: 40px;
+
+  --desktop-top: #dfe9f0;
+  --desktop-bottom: #f4ecdf;
+  --desktop-floor: #d9c2a1;
+
+  --surface: #fffdf9;
+  --surface-hover: #f3ece2;
+  --text: #2d2620;
+  --text-muted: #6f6357;
+  --border: #ddd0bf;
+  --accent: #a85f33;
+  --accent-hover: #8f4d27;
+  --accent-text: #fffaf3;
+  --danger: #b3261e;
+  --focus: #2f6fb3;
+  --link: #1f5fa8;
+  --shadow: 0 8px 28px rgb(40 28 16 / 0.18), 0 1px 3px rgb(40 28 16 / 0.12);
+  --backdrop: rgb(20 14 8 / 0.35);
+
+  /* バルーンはスキンの「紙」の既定値なので、ダークモードでも変えない */
+  --balloon-bg: #fffefb;
+  --balloon-border: #8a7766;
+  --balloon-text: #2d2620;
+  --balloon-anchor: #1f5fa8;
+  --balloon-cursor-bg: #f3d9c4;
+  --balloon-cursor-text: #2d2620;
+  --balloon-focus: #2f6fb3;
+  --balloon-shadow: 0 4px 12px rgb(40 28 16 / 0.15);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --desktop-top: #141a26;
+    --desktop-bottom: #262230;
+    --desktop-floor: #3a2e26;
+
+    --surface: #24201d;
+    --surface-hover: #332d28;
+    --text: #f1e9df;
+    --text-muted: #b5a899;
+    --border: #463d35;
+    --accent: #d08a5a;
+    --accent-hover: #e0a274;
+    --accent-text: #1d1510;
+    --danger: #f2948b;
+    --focus: #8ab8ec;
+    --link: #8ab8ec;
+    --shadow: 0 8px 28px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+    --backdrop: rgb(0 0 0 / 0.6);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --desktop-top: #141a26;
+  --desktop-bottom: #262230;
+  --desktop-floor: #3a2e26;
+
+  --surface: #24201d;
+  --surface-hover: #332d28;
+  --text: #f1e9df;
+  --text-muted: #b5a899;
+  --border: #463d35;
+  --accent: #d08a5a;
+  --accent-hover: #e0a274;
+  --accent-text: #1d1510;
+  --danger: #f2948b;
+  --focus: #8ab8ec;
+  --link: #8ab8ec;
+  --shadow: 0 8px 28px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+  --backdrop: rgb(0 0 0 / 0.6);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--text);
+  background: var(--desktop-bottom);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 枠線や輪の太さ・間隔 (1〜2px) は余白ではないので、4px の刻みには乗せない */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ デスクトップ */
+
+.desktop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(to top, var(--desktop-floor) 0, var(--desktop-floor) var(--space-3), transparent var(--space-3)),
+    linear-gradient(to bottom, var(--desktop-top), var(--desktop-bottom));
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.character {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  will-change: transform;
+}
+
+.character canvas {
+  display: block;
+  image-rendering: auto;
+  touch-action: none;
+}
+
+.character.dragging {
+  z-index: 3;
+}
+
+/* ------------------------------------------------------------------ バルーン */
+
+.balloon {
+  --b-line: calc(var(--b-size) * var(--leading));
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  font-family: var(--b-font);
+  font-size: var(--b-size);
+  font-weight: var(--b-weight);
+  color: var(--b-color);
+}
+
+.balloon-inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.balloon-inner > canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* 画像を持たない内蔵バルーン */
+.balloon-inner.builtin {
+  background: var(--balloon-bg);
+  border: 2px solid var(--balloon-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--balloon-shadow);
+}
+
+/* しっぽ (回した正方形の2辺だけ線を描く) */
+.balloon-inner.builtin::after {
+  content: '';
+  position: absolute;
+  top: calc(var(--space-5) + var(--space-1));
+  width: var(--space-3);
+  height: var(--space-3);
+  background: var(--balloon-bg);
+  border: 2px solid var(--balloon-border);
+  border-left: 0;
+  border-bottom: 0;
+}
+
+.balloon[data-side='left'] .balloon-inner.builtin::after {
+  right: calc(-1 * var(--space-2));
+  transform: rotate(45deg);
+}
+
+.balloon[data-side='right'] .balloon-inner.builtin::after {
+  left: calc(-1 * var(--space-2));
+  transform: rotate(-135deg);
+}
+
+.balloon-text {
+  position: absolute;
+  /* 重なりの基準をここに作り、座標指定の \_b 画像を文字の下 (背景の上) に置く */
+  z-index: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  line-height: var(--b-line);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: pan-y;
+}
+
+.balloon-text::-webkit-scrollbar {
+  display: none;
+}
+
+.balloon-block {
+  position: absolute;
+}
+
+/* 空の行どうしで負の行送りの余白が相殺されないよう、行ごとに独立させる */
+.balloon-line {
+  display: flow-root;
+  min-height: 0;
+}
+
+.balloon-inline-image {
+  vertical-align: middle;
+  max-width: 100%;
+}
+
+.balloon-image {
+  position: absolute;
+  z-index: -1;
+}
+
+.balloon-image-front {
+  z-index: 1;
+}
+
+.balloon .choice,
+.balloon .anchor {
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+}
+
+.balloon .anchor {
+  color: var(--b-anchor);
+  text-decoration: underline;
+}
+
+.balloon .choice {
+  color: inherit;
+}
+
+/* 選択肢のカーソルはスキンの指定どおり。キーボードのフォーカスはそれに輪を足す */
+.balloon[data-cursor='square'] .choice:is(:hover, :focus-visible) {
+  background: var(--b-cursor-bg);
+  color: var(--b-cursor-color);
+}
+
+.balloon[data-cursor='underline'] .choice:is(:hover, :focus-visible) {
+  text-decoration: underline;
+  color: var(--b-cursor-color);
+}
+
+.balloon :is(.choice, .anchor):focus-visible {
+  outline: 2px solid var(--balloon-focus);
+  outline-offset: 0;
+}
+
+/* ------------------------------------------------------------------ 画面の上に重なるもの */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.overlay > * {
+  pointer-events: auto;
+}
+
+.tray-button {
+  position: absolute;
+  left: max(var(--space-4), env(safe-area-inset-left));
+  bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  width: var(--tray-size);
+  height: var(--tray-size);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font-family: var(--font-brand);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.tray-button:hover,
+.tray-button[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--accent-hover);
+}
+
+.empty-state {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-5);
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.empty-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+.empty-text {
+  margin: 0 0 var(--space-4);
+  color: var(--text-muted);
+  line-height: var(--leading);
+}
+
+.drop-hint {
+  position: absolute;
+  inset: max(var(--space-4), env(safe-area-inset-top)) max(var(--space-4), env(safe-area-inset-right))
+    max(var(--space-4), env(safe-area-inset-bottom)) max(var(--space-4), env(safe-area-inset-left));
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ メニュー */
+
+/* 通知 (.toasts) より上に重ねる */
+.menu-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+}
+
+.menu {
+  position: fixed;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 2 * var(--space-2)));
+  max-height: calc(100vh - 2 * var(--space-2));
+  overflow-y: auto;
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover:not([aria-disabled='true']),
+.menu-item[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+
+.menu-item:focus-visible {
+  background: var(--surface-hover);
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.menu-item[aria-disabled='true'] {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.menu-check {
+  width: 1em;
+  flex: none;
+  color: var(--accent);
+  text-align: center;
+}
+
+.menu-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-arrow {
+  color: var(--text-muted);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: var(--space-1) var(--space-2);
+  background: var(--border);
+}
+
+/* ------------------------------------------------------------------ ボタンと入力 */
+
+.btn {
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: var(--weight-bold);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.btn-icon {
+  min-width: var(--icon-button);
+  min-height: var(--icon-button);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.text-input {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.link {
+  color: var(--link);
+}
+
+/* ------------------------------------------------------------------ ダイアログ */
+
+.dialog {
+  width: min(440px, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100vh - 2 * var(--space-4));
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.dialog::backdrop {
+  background: var(--backdrop);
+}
+
+.dialog-title {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+.dialog-text {
+  margin: 0;
+  line-height: var(--leading);
+}
+
+.dialog-section {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text-muted);
+}
+
+.dialog-section:first-child {
+  margin-top: 0;
+}
+
+.dialog-status {
+  min-height: calc(var(--text-md) * var(--leading));
+  margin: var(--space-3) 0 0;
+  color: var(--text-muted);
+  line-height: var(--leading);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.field label {
+  font-weight: var(--weight-medium);
+}
+
+.field-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: var(--leading);
+}
+
+.info-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+}
+
+.info-list dt {
+  color: var(--text-muted);
+}
+
+.info-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: var(--leading);
+}
+
+.package-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.package-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+}
+
+.package-kind {
+  flex: none;
+  width: 5em;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.package-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.package-state {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------------ 通知 */
+
+/* キャラクターとバルーンは画面下にいるので、通知は上に出す */
+.toasts {
+  position: fixed;
+  z-index: 1;
+  inset: auto;
+  left: 50%;
+  top: max(var(--space-4), env(safe-area-inset-top));
+  transform: translateX(-50%);
+  display: grid;
+  gap: var(--space-2);
+  width: min(480px, calc(100vw - 2 * var(--space-4)));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.toast-error {
+  border-color: var(--danger);
+}
+
+.toast-text {
+  flex: 1;
+  line-height: var(--leading);
+}
