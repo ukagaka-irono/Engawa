@@ -58,6 +58,52 @@ function openDB(): Promise<IDBDatabase> {
   return current;
 }
 
+/**
+ * IndexedDB が使えない場所 (ブラウザによっては file:// で開いたページ、プライベートモード、埋め込みの表示など) では、
+ * メモリに置いて動かす。その場合、インストールしたものはページを閉じると消える。
+ */
+const memory = {
+  packages: new Map<string, PackageMeta>(),
+  files: new Map<string, Map<string, Uint8Array>>(),
+};
+
+function memoryFiles(key: string): Map<string, Uint8Array> {
+  let files = memory.files.get(key);
+  if (!files) {
+    files = new Map();
+    memory.files.set(key, files);
+  }
+  return files;
+}
+
+let modePromise: Promise<boolean> | null = null;
+
+/** IndexedDB が使えずメモリで動いているか。一時的な失敗はメモリ扱いにせず、次の呼び出しで試し直す */
+function inMemory(): Promise<boolean> {
+  modePromise ??= openDB().then(
+    () => false,
+    (e: unknown) => {
+      const name = (e as { name?: string } | null)?.name;
+      if (name === 'SecurityError' || name === 'InvalidAccessError' || name === 'ReferenceError' || e instanceof TypeError) {
+        console.warn('[storage] IndexedDB が使えないため、メモリに保存します', e);
+        return true;
+      }
+      modePromise = null;
+      throw e;
+    },
+  );
+  return modePromise;
+}
+
+/** インストールしたものがページを閉じても残るか */
+export async function isPersistent(): Promise<boolean> {
+  try {
+    return !(await inMemory());
+  } catch {
+    return false;
+  }
+}
+
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
@@ -104,11 +150,16 @@ function prefixRange(key: string, prefix: string): IDBKeyRange {
   return prefix ? IDBKeyRange.bound([key, prefix], [key, prefix + '￿']) : packageRange(key);
 }
 
-export function listPackages(): Promise<PackageMeta[]> {
+export async function listPackages(): Promise<PackageMeta[]> {
+  if (await inMemory()) return [...memory.packages.values()].map((m) => structuredClone(m));
   return run(['packages'], 'readonly', (tx) => result(tx.objectStore('packages').getAll() as IDBRequest<PackageMeta[]>));
 }
 
-export function getPackage(key: string): Promise<PackageMeta | undefined> {
+export async function getPackage(key: string): Promise<PackageMeta | undefined> {
+  if (await inMemory()) {
+    const meta = memory.packages.get(key);
+    return meta && structuredClone(meta);
+  }
   return run(['packages'], 'readonly', (tx) => result(tx.objectStore('packages').get(key) as IDBRequest<PackageMeta | undefined>));
 }
 
@@ -116,7 +167,18 @@ export function getPackage(key: string): Promise<PackageMeta | undefined> {
  * パッケージを書き込む。既存のファイルは消さずに上書きする (更新時にセーブデータを残すため)。
  * refresh があれば、その範囲の既存ファイルを先に消す (同じトランザクション内なので途中で失敗しても元のまま)。
  */
-export function putPackage(meta: PackageMeta, files: FileTree, prefix = '', refresh?: Refresh): Promise<void> {
+export async function putPackage(meta: PackageMeta, files: FileTree, prefix = '', refresh?: Refresh): Promise<void> {
+  if (await inMemory()) {
+    memory.packages.set(meta.key, structuredClone(meta));
+    const stored = memoryFiles(meta.key);
+    if (refresh) {
+      const keep = new Set(refresh.keep.map((n) => normalizePath(n)));
+      const head = normalizePath(refresh.prefix) ? normalizePath(refresh.prefix) + '/' : '';
+      for (const path of [...stored.keys()]) if (path.startsWith(head) && !keep.has(basename(path))) stored.delete(path);
+    }
+    for (const [path, data] of files.entries()) stored.set(prefix + path, data);
+    return;
+  }
   return run(['packages', 'files'], 'readwrite', async (tx) => {
     tx.objectStore('packages').put(meta);
     const store = tx.objectStore('files');
@@ -132,7 +194,8 @@ export function putPackage(meta: PackageMeta, files: FileTree, prefix = '', refr
   });
 }
 
-export function readPackageFiles(key: string): Promise<FileTree> {
+export async function readPackageFiles(key: string): Promise<FileTree> {
+  if (await inMemory()) return new FileTree(memoryFiles(key).entries());
   return run(['files'], 'readonly', async (tx) => {
     const store = tx.objectStore('files');
     const range = packageRange(key);
@@ -145,7 +208,8 @@ export function readPackageFiles(key: string): Promise<FileTree> {
 }
 
 /** パッケージ内の1ファイルだけを読む */
-export function readPackageFile(key: string, path: string): Promise<Uint8Array | undefined> {
+export async function readPackageFile(key: string, path: string): Promise<Uint8Array | undefined> {
+  if (await inMemory()) return memory.files.get(key)?.get(normalizePath(path));
   return run(['files'], 'readonly', (tx) => result(tx.objectStore('files').get([key, normalizePath(path)]) as IDBRequest<Uint8Array | undefined>));
 }
 
@@ -154,11 +218,19 @@ export function readPackageFile(key: string, path: string): Promise<Uint8Array |
  * 別のタブで更新・削除されていても古い内容で上書きしないよう、手元の情報ではなく保存されている方を元にする。
  * パッケージが無ければ何もしないで undefined。keep が真を返す (既に新しい値がそろっている) ときは書かずにそれを返す。
  */
-export function patchPackageMeta(
+export async function patchPackageMeta(
   key: string,
   patch: Partial<PackageMeta>,
   keep: (current: PackageMeta) => boolean = () => false,
 ): Promise<PackageMeta | undefined> {
+  if (await inMemory()) {
+    const current = memory.packages.get(key);
+    if (!current) return undefined;
+    if (keep(current)) return structuredClone(current);
+    const next = { ...current, ...patch, key };
+    memory.packages.set(key, next);
+    return structuredClone(next);
+  }
   return run(['packages'], 'readwrite', async (tx) => {
     const store = tx.objectStore('packages');
     const current = await result(store.get(key) as IDBRequest<PackageMeta | undefined>);
@@ -170,13 +242,22 @@ export function patchPackageMeta(
   });
 }
 
-export function writePackageFile(key: string, path: string, data: Uint8Array): Promise<void> {
+export async function writePackageFile(key: string, path: string, data: Uint8Array): Promise<void> {
+  if (await inMemory()) {
+    if (memory.packages.has(key)) memoryFiles(key).set(normalizePath(path), data);
+    return;
+  }
   return run(['files'], 'readwrite', async (tx) => {
     tx.objectStore('files').put(data, [key, normalizePath(path)]);
   });
 }
 
-export function deletePackage(key: string): Promise<void> {
+export async function deletePackage(key: string): Promise<void> {
+  if (await inMemory()) {
+    memory.packages.delete(key);
+    memory.files.delete(key);
+    return;
+  }
   return run(['packages', 'files'], 'readwrite', async (tx) => {
     tx.objectStore('packages').delete(key);
     tx.objectStore('files').delete(packageRange(key));

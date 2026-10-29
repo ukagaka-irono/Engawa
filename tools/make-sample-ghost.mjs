@@ -1,6 +1,6 @@
 // サンプルゴースト「ゆかりとちゅん」の .nar を作る。
 // テキストは sample/engawa/ にあり、画像はここで描いて PNG にする。
-//   node tools/make-sample-ghost.mjs  →  public/sample/engawa.nar
+//   node tools/make-sample-ghost.mjs  →  src/assets/engawa.nar (ビルドで index.html に埋め込まれる)
 import { deflateSync } from 'node:zlib';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
@@ -9,7 +9,7 @@ import { zipSync } from 'fflate';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const srcDir = join(root, 'sample', 'engawa');
-const outFile = join(root, 'public', 'sample', 'engawa.nar');
+const outFile = join(root, 'src', 'assets', 'engawa.nar');
 
 // ---------------------------------------------------------------- 描画
 

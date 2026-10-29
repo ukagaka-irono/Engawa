@@ -1,5 +1,6 @@
 import type { FileTree } from '../vfs/files';
 import type { Shiori, ShioriHooks } from './shiori';
+import ShioriWorker from './shiori-worker.ts?worker&inline';
 import type { FromWorker, ToWorker } from './worker-protocol';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -24,7 +25,8 @@ export class JsShiori implements Shiori {
   ) {}
 
   async load(): Promise<void> {
-    this.worker = new Worker(new URL('./shiori-worker.ts', import.meta.url), { type: 'module' });
+    // Worker は Blob として埋め込む (file:// で開いた index.html からでも起動できるように)
+    this.worker = new ShioriWorker();
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.onMessage(e.data);
     this.worker.onerror = (e) => this.hooks.onLog(`SHIORI worker error: ${e.message}`);
     const master = this.files.sub('ghost/master');

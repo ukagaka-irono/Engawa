@@ -10,6 +10,7 @@ import type { FileTree } from '../vfs/files';
 import { decodeText } from '../util/text';
 import {
   deletePackage,
+  isPersistent,
   listPackages,
   patchPackageMeta,
   readPackageFile,
@@ -30,7 +31,8 @@ import {
 } from './ghost';
 import { saveSettings, saveSettingsNow, settings } from './settings';
 
-const SAMPLE_URL = './sample/engawa.nar';
+// ビルドでは data: URL として index.html に埋め込まれる (file:// で開いても読めるように)
+import SAMPLE_URL from '../assets/engawa.nar?url';
 const ARCHIVE = /\.(nar|zip)$/i;
 
 /** 入力ボックス1つ分の持ち主と種類 */
@@ -98,6 +100,11 @@ export class GhostManager implements GhostEnv {
     requestAnimationFrame(loop);
 
     await this.refreshPackages();
+    if (!(await isPersistent())) {
+      this.toasts.show('このブラウザでは保存領域が使えないため、インストールしたものや設定はページを閉じると消えます', {
+        duration: 12_000,
+      });
+    }
     if (!this.packages.some((p) => p.kind === 'ghost')) await this.installSample();
     await this.bootDefault();
   }
