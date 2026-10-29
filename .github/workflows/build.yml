@@ -1,0 +1,45 @@
+# テストとビルド。開くだけで動く dist/index.html を成果物 (Artifacts) として残す。
+# SHIORI の WebAssembly (src/assets/shiori/) はリポジトリに入っているので、Emscripten や Rust は使わない。
+name: Build
+
+on:
+  push:
+    branches: [main, develop, fix]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同じブランチで新しく push されたら、古い実行は止める
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: 単体テスト
+        run: npm test
+
+      - name: ビルド (型チェックを含む)
+        run: npm run build
+
+      - name: dist/index.html を成果物として残す
+        uses: actions/upload-artifact@v7
+        with:
+          name: engawa-index-html
+          path: dist/index.html
+          if-no-files-found: error
