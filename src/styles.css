@@ -1,108 +1,103 @@
-/* 共有の値はすべてここ (:root) に置く */
+/*
+ * 共有の値はすべてここ (:root) に置く。
+ * 見た目は SSP (Windows 上のベースウェア) に合わせる。SSP のオーナードローメニューや Win32 のダイアログは
+ * OS のダークモードでも明るいままなので、ここでも明るい配色だけを持つ (タスクバーは Windows 既定の暗色)。
+ */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  --font-ui: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', sans-serif;
-  --font-balloon: 'MS UI Gothic', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', sans-serif;
-  /* トレイボタンの「縁」の字 (favicon と同じ明朝) */
+  --font-ui: 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  --font-balloon: 'MS UI Gothic', 'Yu Gothic UI', 'Meiryo UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  /* トレイアイコンの「縁」の字 (favicon と同じ明朝) */
   --font-brand: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  --font-mono: Consolas, 'BIZ UDGothic', 'MS Gothic', ui-monospace, monospace;
 
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --text-sm: 12px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --weight-medium: 500;
-  --weight-bold: 600;
+  --radius-xs: 2px;
+  --text-xs: 8px;
+  --text-sm: 11px;
+  --text-md: 12px;
+  --text-lg: 14px;
+  --text-xl: 18px;
+  --weight-bold: 700;
   --leading: 1.5;
-  --control-height: 36px;
-  --icon-button: 32px;
-  --tray-size: 40px;
 
-  --desktop-top: #dfe9f0;
-  --desktop-bottom: #f4ecdf;
-  --desktop-floor: #d9c2a1;
+  /* Windows のコントロールの寸法 */
+  --control-height: 24px;
+  --button-width: 76px;
+  --titlebar-height: 32px;
+  --titlebar-button: 44px;
+  --taskbar-height: 40px;
+  --tray-size: 28px;
+  --menu-row: 24px;
+  --menu-check: 24px;
+  --menu-sidebar: 24px;
 
-  --surface: #fffdf9;
-  --surface-hover: #f3ece2;
-  --text: #2d2620;
-  --text-muted: #6f6357;
-  --border: #ddd0bf;
-  --accent: #a85f33;
-  --accent-hover: #8f4d27;
-  --accent-text: #fffaf3;
-  --danger: #b3261e;
-  --focus: #2f6fb3;
-  --link: #1f5fa8;
-  --shadow: 0 8px 28px rgb(40 28 16 / 0.18), 0 1px 3px rgb(40 28 16 / 0.12);
-  --backdrop: rgb(20 14 8 / 0.35);
+  --desktop-top: #4f86c6;
+  --desktop-bottom: #bcd6ee;
 
-  /* バルーンはスキンの「紙」の既定値なので、ダークモードでも変えない */
-  --balloon-bg: #fffefb;
-  --balloon-border: #8a7766;
-  --balloon-text: #2d2620;
-  --balloon-anchor: #1f5fa8;
-  --balloon-cursor-bg: #f3d9c4;
-  --balloon-cursor-text: #2d2620;
-  --balloon-focus: #2f6fb3;
-  --balloon-shadow: 0 4px 12px rgb(40 28 16 / 0.15);
-}
+  /* Win32 のウィンドウ */
+  --window: #f0f0f0;
+  --window-text: #1a1a1a;
+  --window-frame: #7a7a7a;
+  --titlebar: #ffffff;
+  --titlebar-text: #1a1a1a;
+  --close-hover: #e81123;
+  --close-hover-text: #ffffff;
+  --text-muted: #5e5e5e;
+  --field: #ffffff;
+  --field-border: #7a7a7a;
+  --button: #e1e1e1;
+  --button-border: #adadad;
+  --button-hover: #e5f1fb;
+  --accent: #0078d7;
+  /* ドロップの案内 (白文字が明るいデスクトップの上でも読める濃さ) */
+  --drop-hint-bg: rgb(0 84 153 / 0.8);
+  --danger: #c42b1c;
+  --disabled-text: #8c8c8c;
+  --disabled-fill: #cccccc;
+  --disabled-border: #bfbfbf;
+  /* トレイアイコン (favicon と同じ色) */
+  --brand: #a85f33;
+  --brand-text: #fffaf3;
+  --accent-text: #ffffff;
+  --focus: #0078d7;
+  --link: #0066cc;
+  --shadow: 0 0 24px rgb(0 0 0 / 0.35);
+  --backdrop: rgb(0 0 0 / 0.25);
 
-:root[data-theme='light'] {
-  color-scheme: light;
-}
+  /* SSP の既定のオーナードローメニュー (シェルの menu.* で上書きされる) */
+  --menu-bg: #ffffff;
+  --menu-text: #1a1a1a;
+  --menu-fg-bg: #0078d7;
+  --menu-fg-text: #ffffff;
+  --menu-disable-text: #8c8c8c;
+  --menu-separator: #c8c8c8;
+  --menu-frame: #8c8c8c;
+  --menu-sidebar-top: #7ea9e3;
+  --menu-sidebar-bottom: #1f4f9e;
+  --menu-sidebar-text: #ffffff;
+  --menu-shadow: 2px 2px 4px rgb(0 0 0 / 0.3);
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
+  /* Windows のタスクバー */
+  --taskbar: #202020;
+  --taskbar-text: #ffffff;
+  --taskbar-hover: #3a3a3a;
 
-    --desktop-top: #141a26;
-    --desktop-bottom: #262230;
-    --desktop-floor: #3a2e26;
-
-    --surface: #24201d;
-    --surface-hover: #332d28;
-    --text: #f1e9df;
-    --text-muted: #b5a899;
-    --border: #463d35;
-    --accent: #d08a5a;
-    --accent-hover: #e0a274;
-    --accent-text: #1d1510;
-    --danger: #f2948b;
-    --focus: #8ab8ec;
-    --link: #8ab8ec;
-    --shadow: 0 8px 28px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
-    --backdrop: rgb(0 0 0 / 0.6);
-  }
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-
-  --desktop-top: #141a26;
-  --desktop-bottom: #262230;
-  --desktop-floor: #3a2e26;
-
-  --surface: #24201d;
-  --surface-hover: #332d28;
-  --text: #f1e9df;
-  --text-muted: #b5a899;
-  --border: #463d35;
-  --accent: #d08a5a;
-  --accent-hover: #e0a274;
-  --accent-text: #1d1510;
-  --danger: #f2948b;
-  --focus: #8ab8ec;
-  --link: #8ab8ec;
-  --shadow: 0 8px 28px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
-  --backdrop: rgb(0 0 0 / 0.6);
+  /* 内蔵バルーン (SSP の既定のバルーンに寄せた白い紙) */
+  --balloon-bg: #ffffff;
+  --balloon-border: #000000;
+  --balloon-text: #000000;
+  --balloon-anchor: #0000ee;
+  --balloon-cursor-bg: #316ac5;
+  --balloon-cursor-text: #ffffff;
+  --balloon-focus: #0078d7;
+  --balloon-shadow: 2px 2px 3px rgb(0 0 0 / 0.25);
+  --balloon-radius: 8px;
 }
 
 *,
@@ -121,14 +116,14 @@ body {
 body {
   font-family: var(--font-ui);
   font-size: var(--text-md);
-  color: var(--text);
+  color: var(--window-text);
   background: var(--desktop-bottom);
   -webkit-font-smoothing: antialiased;
 }
 
 /* 枠線や輪の太さ・間隔 (1〜2px) は余白ではないので、4px の刻みには乗せない */
 :focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 1px dotted var(--window-text);
   outline-offset: 2px;
 }
 
@@ -150,13 +145,12 @@ body {
 
 /* ------------------------------------------------------------------ デスクトップ */
 
+/* キャラクターはタスクバーの上 (作業領域の下端) に立つ */
 .desktop {
   position: fixed;
-  inset: 0;
+  inset: 0 0 calc(var(--taskbar-height) + env(safe-area-inset-bottom)) 0;
   overflow: hidden;
-  background:
-    linear-gradient(to top, var(--desktop-floor) 0, var(--desktop-floor) var(--space-3), transparent var(--space-3)),
-    linear-gradient(to bottom, var(--desktop-top), var(--desktop-bottom));
+  background: linear-gradient(to bottom, var(--desktop-top), var(--desktop-bottom));
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -209,8 +203,8 @@ body {
 /* 画像を持たない内蔵バルーン */
 .balloon-inner.builtin {
   background: var(--balloon-bg);
-  border: 2px solid var(--balloon-border);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--balloon-border);
+  border-radius: var(--balloon-radius);
   box-shadow: var(--balloon-shadow);
 }
 
@@ -222,18 +216,18 @@ body {
   width: var(--space-3);
   height: var(--space-3);
   background: var(--balloon-bg);
-  border: 2px solid var(--balloon-border);
+  border: 1px solid var(--balloon-border);
   border-left: 0;
   border-bottom: 0;
 }
 
 .balloon[data-side='left'] .balloon-inner.builtin::after {
-  right: calc(-1 * var(--space-2));
+  right: calc(-1 * var(--space-2) + 1px);
   transform: rotate(45deg);
 }
 
 .balloon[data-side='right'] .balloon-inner.builtin::after {
-  left: calc(-1 * var(--space-2));
+  left: calc(-1 * var(--space-2) + 1px);
   transform: rotate(-135deg);
 }
 
@@ -284,7 +278,7 @@ body {
 .balloon .choice,
 .balloon .anchor {
   cursor: pointer;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   text-decoration: none;
 }
 
@@ -297,7 +291,7 @@ body {
   color: inherit;
 }
 
-/* 選択肢のカーソルはスキンの指定どおり。キーボードのフォーカスはそれに輪を足す */
+/* 選択肢のカーソルはスキンの指定どおり。キーボードのフォーカスはそれに点線を足す */
 .balloon[data-cursor='square'] .choice:is(:hover, :focus-visible) {
   background: var(--b-cursor-bg);
   color: var(--b-cursor-color);
@@ -309,7 +303,7 @@ body {
 }
 
 .balloon :is(.choice, .anchor):focus-visible {
-  outline: 2px solid var(--balloon-focus);
+  outline: 1px dotted var(--balloon-focus);
   outline-offset: 0;
 }
 
@@ -326,41 +320,97 @@ body {
   pointer-events: auto;
 }
 
-.tray-button {
+/* Windows のタスクバー。右端の通知領域にトレイアイコンと時計 */
+.taskbar {
   position: absolute;
-  left: max(var(--space-4), env(safe-area-inset-left));
-  bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--taskbar-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+  background: var(--taskbar);
+  color: var(--taskbar-text);
+}
+
+.taskbar-tray {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 max(var(--space-2), env(safe-area-inset-right)) 0 var(--space-2);
+}
+
+.tray-button {
+  display: grid;
+  place-items: center;
   width: var(--tray-size);
   height: var(--tray-size);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--accent);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  cursor: default;
+}
+
+/* 暗いタスクバーの上では、フォーカスの点線を明るい色にする */
+.taskbar :focus-visible {
+  outline-color: var(--taskbar-text);
+}
+
+.tray-icon {
+  display: grid;
+  place-items: center;
+  width: calc(var(--tray-size) - var(--space-2));
+  height: calc(var(--tray-size) - var(--space-2));
+  border-radius: var(--radius-xs);
+  background: var(--brand);
+  color: var(--brand-text);
   font-family: var(--font-brand);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
   font-weight: var(--weight-bold);
-  box-shadow: var(--shadow);
-  cursor: pointer;
 }
 
 .tray-button:hover,
 .tray-button[aria-expanded='true'] {
-  background: var(--surface-hover);
-  color: var(--accent-hover);
+  background: var(--taskbar-hover);
 }
 
+.taskbar-clock {
+  display: grid;
+  place-items: center;
+  min-width: calc(var(--button-width) - var(--space-2));
+  padding: 0 var(--space-1);
+  font-size: var(--text-md);
+  line-height: 1.3;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ゴーストがいないときの案内 (タイトルバー付きの小さなウィンドウ) */
 .empty-state {
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: 45%;
   transform: translate(-50%, -50%);
   width: min(360px, calc(100vw - 2 * var(--space-4)));
-  padding: var(--space-5);
-  text-align: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--window);
+  border: 1px solid var(--window-frame);
   box-shadow: var(--shadow);
+}
+
+.empty-titlebar {
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-height);
+  padding: 0 var(--space-3);
+  background: var(--titlebar);
+  font-size: var(--text-md);
+}
+
+.empty-body {
+  padding: var(--space-4);
 }
 
 .empty-title {
@@ -375,21 +425,26 @@ body {
   line-height: var(--leading);
 }
 
+.empty-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .drop-hint {
   position: absolute;
   inset: max(var(--space-4), env(safe-area-inset-top)) max(var(--space-4), env(safe-area-inset-right))
-    max(var(--space-4), env(safe-area-inset-bottom)) max(var(--space-4), env(safe-area-inset-left));
+    calc(var(--taskbar-height) + env(safe-area-inset-bottom) + var(--space-4)) max(var(--space-4), env(safe-area-inset-left));
   display: grid;
   place-items: center;
-  border: 2px dashed var(--accent);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  font-size: var(--text-lg);
+  border: 2px dashed var(--accent-text);
+  background: var(--drop-hint-bg);
+  color: var(--accent-text);
+  font-size: var(--text-xl);
   font-weight: var(--weight-bold);
   pointer-events: none;
 }
 
-/* ------------------------------------------------------------------ メニュー */
+/* ------------------------------------------------------------------ メニュー (SSP のオーナードローメニュー) */
 
 /* 通知 (.toasts) より上に重ねる */
 .menu-layer {
@@ -400,53 +455,94 @@ body {
 
 .menu {
   position: fixed;
+  display: flex;
   min-width: 200px;
-  max-width: min(320px, calc(100vw - 2 * var(--space-2)));
+  max-width: min(360px, calc(100vw - 2 * var(--space-2)));
   max-height: calc(100vh - 2 * var(--space-2));
+  padding: 2px;
+  background-color: var(--menu-bg);
+  background-image: var(--m-bg-image, none);
+  background-position: var(--m-bg-position, left top);
+  background-repeat: var(--m-bg-repeat, no-repeat);
+  border: 1px solid var(--m-frame, var(--menu-frame));
+  box-shadow: var(--menu-shadow);
+  color: var(--m-text, var(--menu-text));
+  font-family: var(--m-font, var(--font-ui));
+  font-size: var(--m-size, var(--text-md));
+}
+
+/* 左端のサイドバー (いちばん上のメニューだけ) */
+.menu-sidebar {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: var(--m-sidebar-width, var(--menu-sidebar));
+  margin-right: 2px;
+  background: var(--m-sidebar-image, linear-gradient(to bottom, var(--menu-sidebar-top), var(--menu-sidebar-bottom)));
+  background-repeat: var(--m-sidebar-repeat, no-repeat);
+  background-position: var(--m-sidebar-position, center bottom);
+  color: var(--menu-sidebar-text);
+  font-family: var(--font-ui);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+}
+
+.menu-sidebar-text {
+  padding: var(--space-2) 0;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.menu-sidebar.has-image .menu-sidebar-text {
+  visibility: hidden;
+}
+
+.menu-items {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: var(--space-1);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow);
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-2);
+  min-height: var(--menu-row);
+  padding: 0 var(--space-4) 0 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: transparent;
-  color: var(--text);
+  color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
-}
-
-.menu-item:hover:not([aria-disabled='true']),
-.menu-item[aria-expanded='true'] {
-  background: var(--surface-hover);
-}
-
-.menu-item:focus-visible {
-  background: var(--surface-hover);
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-
-.menu-item[aria-disabled='true'] {
-  color: var(--text-muted);
   cursor: default;
 }
 
+/* 選ばれている項目はフォアグラウンド (シェルの画像があれば、メニューと同じ位置の部分を見せる) */
+.menu-item:is(:hover, :focus-visible):not([aria-disabled='true']),
+.menu-item[aria-expanded='true'] {
+  background-color: var(--menu-fg-bg);
+  background-image: var(--m-fg-image, none);
+  background-position: var(--m-fg-position, calc(0px - var(--row-left, 0px)) calc(0px - var(--row-top, 0px)));
+  background-repeat: var(--m-fg-repeat, no-repeat);
+  color: var(--m-fg-text, var(--menu-fg-text));
+}
+
+.menu-item:focus-visible {
+  outline: 1px dotted currentColor;
+  outline-offset: -3px;
+}
+
+.menu-item[aria-disabled='true'] {
+  color: var(--m-disable, var(--menu-disable-text));
+}
+
 .menu-check {
-  width: 1em;
+  width: var(--menu-check);
   flex: none;
-  color: var(--accent);
   text-align: center;
+  font-size: var(--text-sm);
 }
 
 .menu-label {
@@ -456,113 +552,157 @@ body {
   white-space: nowrap;
 }
 
+.menu-label u {
+  text-decoration: underline;
+}
+
 .menu-arrow {
-  color: var(--text-muted);
+  margin-left: var(--space-4);
+  font-size: var(--text-xs);
 }
 
 .menu-separator {
   height: 1px;
-  margin: var(--space-1) var(--space-2);
-  background: var(--border);
+  margin: 3px 2px 3px var(--menu-check);
+  background: var(--m-separator, var(--menu-separator));
 }
 
-/* ------------------------------------------------------------------ ボタンと入力 */
+/* ------------------------------------------------------------------ ボタンと入力 (Windows のコントロール) */
 
 .btn {
+  min-width: var(--button-width);
   min-height: var(--control-height);
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--button-border);
+  border-radius: 0;
+  background: var(--button);
+  color: var(--window-text);
   font: inherit;
-  cursor: pointer;
+  cursor: default;
 }
 
-.btn-primary {
-  background: var(--accent);
+.btn:hover:not(:disabled) {
+  background: var(--button-hover);
   border-color: var(--accent);
-  color: var(--accent-text);
-  font-weight: var(--weight-bold);
 }
 
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+/* 既定のボタン (Enter で押される) は青い枠 */
+.btn-primary {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.btn-secondary {
-  background: var(--surface);
-  color: var(--text);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--surface-hover);
-}
-
+.btn-secondary,
 .btn-danger {
-  background: transparent;
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: var(--button-border);
 }
 
 .btn-icon {
-  min-width: var(--icon-button);
-  min-height: var(--icon-button);
-  padding: 0 var(--space-2);
+  min-width: var(--titlebar-button);
+  min-height: var(--titlebar-height);
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--text-muted);
 }
 
 .btn-icon:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text);
+  background: var(--close-hover);
+  color: var(--close-hover-text);
 }
 
 .btn:disabled {
-  opacity: 0.45;
-  cursor: default;
+  color: var(--disabled-text);
+  border-color: var(--disabled-border);
+  background: var(--disabled-fill);
+}
+
+.btn:focus-visible {
+  outline: 1px dotted var(--window-text);
+  outline-offset: -4px;
 }
 
 .text-input {
   width: 100%;
   min-height: var(--control-height);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--field-border);
+  border-radius: 0;
+  background: var(--field);
+  color: var(--window-text);
   font: inherit;
+}
+
+/* 入力欄のフォーカスは Windows と同じく枠の色で示す */
+.text-input:focus {
+  border-color: var(--focus);
+  outline: none;
 }
 
 .link {
   color: var(--link);
 }
 
-/* ------------------------------------------------------------------ ダイアログ */
+/* ------------------------------------------------------------------ ダイアログ (Win32 のウィンドウ) */
 
 .dialog {
   width: min(440px, calc(100vw - 2 * var(--space-4)));
   max-height: calc(100vh - 2 * var(--space-4));
-  padding: var(--space-5);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  color: var(--text);
+  padding: 0;
+  border: 1px solid var(--window-frame);
+  border-radius: 0;
+  background: var(--window);
+  color: var(--window-text);
   box-shadow: var(--shadow);
+}
+
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .dialog::backdrop {
   background: var(--backdrop);
 }
 
+.dialog-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.dialog-titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-height);
+  padding: 0 var(--titlebar-button) 0 var(--space-3);
+  background: var(--titlebar);
+  color: var(--titlebar-text);
+}
+
+.dialog-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
 .dialog-title {
-  margin: 0 0 var(--space-4);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-4) 0;
 }
 
 .dialog-text {
@@ -572,9 +712,8 @@ body {
 
 .dialog-section {
   margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   font-weight: var(--weight-bold);
-  color: var(--text-muted);
 }
 
 .dialog-section:first-child {
@@ -589,23 +728,23 @@ body {
 }
 
 .dialog-actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
-  margin-top: var(--space-5);
+  padding: var(--space-4);
 }
 
 .field {
   display: grid;
-  gap: var(--space-1);
-  margin-bottom: var(--space-3);
-}
-
-.field label {
-  font-weight: var(--weight-medium);
+  grid-template-columns: 14em 1fr;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .field-hint {
+  grid-column: 2;
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: var(--leading);
@@ -632,21 +771,25 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: var(--space-1);
+  border: 1px solid var(--field-border);
+  background: var(--field);
 }
 
 .package-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--control-height);
+  min-height: calc(var(--control-height) + var(--space-2));
+  padding: 0 var(--space-2);
+}
+
+.package-row + .package-row {
+  border-top: 1px solid var(--window);
 }
 
 .package-kind {
   flex: none;
-  width: 5em;
-  font-size: var(--text-sm);
+  width: 6em;
   color: var(--text-muted);
 }
 
@@ -658,8 +801,83 @@ body {
 }
 
 .package-state {
-  font-size: var(--text-sm);
   color: var(--text-muted);
+}
+
+/* ヘルプ (README) */
+.help-dialog {
+  width: min(760px, calc(100vw - 2 * var(--space-4)));
+  height: min(640px, calc(100vh - 2 * var(--space-4)));
+}
+
+.help-dialog .dialog-body {
+  padding-bottom: var(--space-4);
+  background: var(--field);
+  border-bottom: 1px solid #d9d9d9;
+  line-height: var(--leading);
+  user-select: text;
+}
+
+.help-doc .help-h1 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
+}
+
+.help-doc .help-h2 {
+  margin: var(--space-5) 0 var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid #d9d9d9;
+  font-size: var(--text-lg);
+}
+
+.help-doc .help-h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-md);
+}
+
+.help-doc p,
+.help-doc ul {
+  margin: 0 0 var(--space-3);
+}
+
+.help-doc ul {
+  padding-left: var(--space-5);
+}
+
+.help-doc code {
+  padding: 0 2px;
+  background: var(--window);
+  font-family: var(--font-mono);
+}
+
+.help-doc pre {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  background: var(--window);
+  border: 1px solid #d9d9d9;
+}
+
+.help-doc pre code {
+  padding: 0;
+  background: none;
+}
+
+.help-doc table {
+  margin: 0 0 var(--space-3);
+  border-collapse: collapse;
+}
+
+.help-doc th,
+.help-doc td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid #d9d9d9;
+  text-align: left;
+  vertical-align: top;
+}
+
+.help-doc th {
+  background: var(--window);
 }
 
 /* ------------------------------------------------------------------ 通知 */
@@ -688,19 +906,23 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  background: var(--window);
+  border: 1px solid var(--window-frame);
   box-shadow: var(--shadow);
   pointer-events: auto;
 }
 
 .toast-error {
-  border-color: var(--danger);
+  border-left: 4px solid var(--danger);
 }
 
 .toast-text {
   flex: 1;
   line-height: var(--leading);
+}
+
+.toast .btn-icon {
+  min-height: var(--control-height);
+  min-width: var(--titlebar-button);
 }

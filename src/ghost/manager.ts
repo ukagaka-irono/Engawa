@@ -3,7 +3,9 @@ import { Descript } from '../package/descript';
 import { acceptNamesOf, InstallError, installFiles, type InstallResult, type InstallTarget } from '../package/installer';
 import { CharacterLayer } from '../shell/character-layer';
 import { Shell } from '../shell/shell';
-import { InputBox, packageKindLabel, showInfo, showOptions, showPackages, Toasts } from '../ui/dialogs';
+import { InputBox, packageKindLabel, showHelp, showInfo, showOptions, showPackages, Toasts } from '../ui/dialogs';
+import { el } from '../ui/dom';
+import { menuSkin } from '../ui/menu-skin';
 import { ContextMenu, type MenuItem } from '../ui/menu';
 import { filesFromDirectoryEntry, filesFromFileList, filesFromZip } from '../vfs/archive';
 import type { FileTree } from '../vfs/files';
@@ -33,6 +35,7 @@ import { saveSettings, saveSettingsNow, settings } from './settings';
 
 // ビルドでは data: URL として index.html に埋め込まれる (file:// で開いても読めるように)
 import SAMPLE_URL from '../assets/engawa.nar?url';
+import README from '../../README.md?raw';
 const ARCHIVE = /\.(nar|zip)$/i;
 
 /** 入力ボックス1つ分の持ち主と種類 */
@@ -93,6 +96,7 @@ export class GhostManager implements GhostEnv {
 
   async init(): Promise<void> {
     this.bindGlobalEvents();
+    this.startClock();
     const loop = (now: number) => {
       for (const g of this.ghosts) g.tick(now);
       requestAnimationFrame(loop);
@@ -143,7 +147,10 @@ export class GhostManager implements GhostEnv {
   }
 
   openMenu(ghost: Ghost | undefined, x: number, y: number, above = false): void {
-    void this.buildMenu(ghost).then((items) => this.menu.open(items, x, y, above));
+    const g = ghost?.alive ? ghost : undefined;
+    void Promise.all([this.buildMenu(g), g ? menuSkin(g.shell.descript, (p) => g.shellFileUrl(p)) : undefined]).then(([items, skin]) =>
+      this.menu.open(items, x, y, { above, skin, sidebar: BASEWARE_NAME }),
+    );
   }
 
   changeGhost(from: Ghost, target: string, raiseEvent: boolean): void {
@@ -518,13 +525,13 @@ export class GhostManager implements GhostEnv {
       const [recommend, portal] = await Promise.all([g.sites('sakura.recommendsites'), g.sites('sakura.portalsites')]);
       const siteItems = (sites: typeof recommend): MenuItem[] =>
         sites.map((s) => (s.title === '-' ? { separator: true } : { label: s.title, action: () => g.openUrl(s.url) }));
-      if (portal.length) items.push({ label: 'ポータル', submenu: siteItems(portal) });
-      if (recommend.length) items.push({ label: 'おすすめ', submenu: siteItems(recommend) });
+      if (portal.length) items.push({ label: 'ポータル', key: 'P', submenu: siteItems(portal) });
+      if (recommend.length) items.push({ label: 'おすすめ', key: 'R', submenu: siteItems(recommend) });
       if (items.length) items.push({ separator: true });
 
-      items.push({ label: '話しかける…', action: () => void g.communicate() }, { separator: true });
       items.push({
         label: 'ゴースト切り替え',
+        key: 'G',
         submenu: ghosts.map(
           (p): MenuItem => ({
             label: p.name,
@@ -537,6 +544,7 @@ export class GhostManager implements GhostEnv {
       });
       items.push({
         label: '他のゴーストを呼ぶ',
+        key: 'C',
         submenu: ghosts.map(
           (p): MenuItem => ({
             label: p.name,
@@ -547,6 +555,7 @@ export class GhostManager implements GhostEnv {
       });
       items.push({
         label: 'シェル',
+        key: 'S',
         submenu: g.shellDirs.map(
           (d): MenuItem => ({
             label: Shell.fromGhost(g.files, d).name,
@@ -565,9 +574,10 @@ export class GhostManager implements GhostEnv {
           dress.push({ label: `${b.category} / ${b.part}`, check: 'checkbox', checked: b.enabled, action: () => g.setDressup(scope, b.id) });
         }
       }
-      items.push({ label: '着せ替え', submenu: dress });
+      items.push({ label: '着せ替え', key: 'D', submenu: dress });
       items.push({
         label: 'バルーン',
+        key: 'B',
         submenu: [
           { label: '内蔵バルーン', check: 'radio', checked: g.skin.key === null, action: () => void g.changeBalloon(null) },
           ...balloons.map(
@@ -575,10 +585,11 @@ export class GhostManager implements GhostEnv {
           ),
         ],
       });
-      items.push({ separator: true });
+      items.push({ separator: true }, { label: '話しかける…', key: 'T', action: () => void g.communicate() });
     } else {
       items.push({
         label: 'ゴーストを起動',
+        key: 'G',
         submenu: ghosts.map((p): MenuItem => ({ label: p.name, disabled: this.isActive(p.key), action: () => void this.boot(p, { kind: 'boot' }) })),
       });
       items.push({ separator: true });
@@ -586,18 +597,21 @@ export class GhostManager implements GhostEnv {
 
     items.push({
       label: 'インストール',
+      key: 'I',
       submenu: [
-        { label: 'ファイルからインストール…', action: () => this.pickFiles(false) },
-        { label: 'フォルダからインストール…', action: () => this.pickFiles(true) },
+        { label: 'ファイルからインストール…', key: 'F', action: () => this.pickFiles(false) },
+        { label: 'フォルダからインストール…', key: 'D', action: () => this.pickFiles(true) },
         { separator: true },
-        { label: 'インストール済み…', action: () => this.openPackages() },
+        { label: 'インストール済み…', key: 'L', action: () => this.openPackages() },
       ],
     });
-    items.push({ label: 'オプション…', action: () => this.openOptions() });
-    items.push({ label: '情報…', action: () => this.openInfo(g) });
+    items.push({ label: 'オプション…', key: 'O', action: () => this.openOptions() });
     items.push({ separator: true });
-    if (g) items.push({ label: `「${g.name}」を閉じる`, action: () => void this.closeGhost(g) });
-    if (this.ghosts.length > 1) items.push({ label: 'すべて閉じる', action: () => void this.closeAll() });
+    items.push({ label: 'ヘルプ…', key: 'H', action: () => showHelp(README) });
+    items.push({ label: '情報…', key: 'A', action: () => this.openInfo(g) });
+    if (g || this.ghosts.length > 1) items.push({ separator: true });
+    if (g) items.push({ label: `「${g.name}」を閉じる`, key: 'X', action: () => void this.closeGhost(g) });
+    if (this.ghosts.length > 1) items.push({ label: 'すべて閉じる', key: 'Q', action: () => void this.closeAll() });
     return items;
   }
 
@@ -697,6 +711,21 @@ export class GhostManager implements GhostEnv {
 
   // ---------------------------------------------------------------- 全体のイベント
 
+  /** タスクバーの時計 (時刻と日付の2行)。分が変わるたびに描き直す */
+  private startClock(): void {
+    const clock = this.overlay.querySelector<HTMLTimeElement>('.taskbar-clock');
+    if (!clock) return;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const draw = () => {
+      const now = new Date();
+      const date = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
+      clock.dateTime = `${date.replaceAll('/', '-')}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      clock.replaceChildren(el('span', {}, `${now.getHours()}:${pad(now.getMinutes())}`), el('span', {}, date));
+      window.setTimeout(draw, 60_000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 50);
+    };
+    draw();
+  }
+
   private bindGlobalEvents(): void {
     const markInput = () => (this.lastInput = Date.now());
     window.addEventListener('pointerdown', markInput, { capture: true });
@@ -720,8 +749,10 @@ export class GhostManager implements GhostEnv {
         return;
       }
       this.menuFromTray = true;
+      // 通知領域のメニューと同じく、タスクバーの上にトレイの右端で揃えて出す
       const r = this.tray.getBoundingClientRect();
-      this.openMenu(this.current, r.left, r.top, true);
+      const bar = this.tray.closest('.taskbar')?.getBoundingClientRect() ?? r;
+      this.openMenu(this.current, r.right, bar.top, true);
     });
 
     const dropHint = this.overlay.querySelector<HTMLElement>('.drop-hint')!;

@@ -1,4 +1,5 @@
 import { el, tokenPx } from './dom';
+import type { MenuSkin } from './menu-skin';
 
 export interface MenuItem {
   label?: string;
@@ -9,11 +10,22 @@ export interface MenuItem {
   checked?: boolean;
   disabled?: boolean;
   separator?: boolean;
+  /** アクセスキー (SSP の「ゴースト切り替え(G)」の G)。メニューを開いている間にその文字を押すと選ぶ */
+  key?: string;
+}
+
+export interface MenuOptions {
+  /** y をメニューの下端にする (画面下のトレイから開くとき) */
+  above?: boolean;
+  /** シェルの menu.* の見た目 */
+  skin?: MenuSkin;
+  /** いちばん上のメニューの左端に出すサイドバーの文字 (無ければサイドバーを出さない) */
+  sidebar?: string;
 }
 
 /**
- * 右クリックメニュー (オーナードローメニュー相当)。
- * 項目は roving tabindex で、矢印キー・Home/End・Enter/Space・Escape・←/→ で操作する。Tab で閉じる。
+ * 右クリックメニュー (SSP のオーナードローメニュー相当)。
+ * 項目は roving tabindex で、矢印キー・Home/End・Enter/Space・Escape・←/→・アクセスキーで操作する。Tab で閉じる。
  */
 export class ContextMenu {
   /** 開閉を知らせる (トレイボタンの aria-expanded 用) */
@@ -24,6 +36,7 @@ export class ContextMenu {
   /** サブメニュー → それを開いた項目 */
   private readonly openers = new WeakMap<HTMLElement, HTMLElement>();
   private returnFocus: HTMLElement | null = null;
+  private options: MenuOptions = {};
 
   constructor(parent: HTMLElement) {
     parent.appendChild(this.root);
@@ -46,14 +59,14 @@ export class ContextMenu {
     return !this.root.hidden;
   }
 
-  /** above: y をメニューの下端にする (画面下のボタンから開くとき) */
-  open(items: MenuItem[], x: number, y: number, above = false): void {
+  open(items: MenuItem[], x: number, y: number, options: MenuOptions = {}): void {
     this.close(false);
+    this.options = options;
     this.returnFocus = document.activeElement as HTMLElement | null;
     this.root.hidden = false;
     const list = this.renderList(items, 0);
-    const gutter = tokenPx('--space-2', 8);
-    this.position(list, x, above ? y - list.offsetHeight - gutter : y, null);
+    const gutter = tokenPx('--space-1', 4);
+    this.position(list, x, options.above ? y - list.offsetHeight - gutter : y, null);
     this.items(list)[0]?.focus();
     this.onToggle?.(true);
   }
@@ -69,7 +82,7 @@ export class ContextMenu {
   }
 
   private items(list: HTMLElement): HTMLElement[] {
-    return [...list.querySelectorAll<HTMLElement>(':scope > .menu-item')];
+    return [...list.querySelectorAll<HTMLElement>(':scope > .menu-items > .menu-item')];
   }
 
   /** depth より深いサブメニューを消す。消すメニューにフォーカスがあれば、それを開いた項目へ戻す */
@@ -89,19 +102,37 @@ export class ContextMenu {
     this.trim(depth);
     const list = el('div', { className: 'menu' });
     list.setAttribute('role', 'menu');
+    const { skin, sidebar } = this.options;
+    for (const [name, value] of Object.entries(skin?.vars ?? {})) list.style.setProperty(name, value);
+    if (depth === 0 && sidebar !== undefined) {
+      const bar = el('div', { className: skin?.sidebarImage ? 'menu-sidebar has-image' : 'menu-sidebar' }, el('span', { className: 'menu-sidebar-text' }, sidebar));
+      bar.setAttribute('aria-hidden', 'true');
+      list.appendChild(bar);
+    }
+    const column = el('div', { className: 'menu-items' });
+    list.appendChild(column);
     for (const item of items) {
       if (item.separator) {
         const sep = el('div', { className: 'menu-separator' });
         sep.setAttribute('role', 'separator');
-        list.appendChild(sep);
+        column.appendChild(sep);
         continue;
       }
       const btn = el('button', { type: 'button', className: 'menu-item', tabIndex: -1 });
       btn.setAttribute('role', item.check === 'radio' ? 'menuitemradio' : item.check === 'checkbox' ? 'menuitemcheckbox' : 'menuitem');
       if (item.check) btn.setAttribute('aria-checked', String(!!item.checked));
-      const check = el('span', { className: 'menu-check' }, item.checked ? '✓' : '');
+      const check = el('span', { className: 'menu-check' }, item.checked ? (item.check === 'radio' ? '●' : '✓') : '');
       check.setAttribute('aria-hidden', 'true');
-      btn.append(check, el('span', { className: 'menu-label' }, item.label ?? ''));
+      const label = el('span', { className: 'menu-label' }, item.label ?? '');
+      if (item.key) {
+        // 「…」で終わる項目は SSP と同じく「名前(K)…」の順にする
+        const ellipsis = label.textContent!.endsWith('…');
+        if (ellipsis) label.textContent = label.textContent!.slice(0, -1);
+        label.append('(', el('u', {}, item.key), ellipsis ? ')…' : ')');
+        btn.dataset.key = item.key.toLowerCase();
+        btn.setAttribute('aria-keyshortcuts', item.key);
+      }
+      btn.append(check, label);
       // 無効な項目もフォーカスは受ける (読み上げで存在が分かるように)
       const disabled = !!item.disabled || (item.submenu !== undefined && item.submenu.length === 0);
       if (disabled) btn.setAttribute('aria-disabled', 'true');
@@ -109,7 +140,7 @@ export class ContextMenu {
       if (item.submenu) {
         btn.setAttribute('aria-haspopup', 'menu');
         btn.setAttribute('aria-expanded', 'false');
-        const arrow = el('span', { className: 'menu-arrow' }, '›');
+        const arrow = el('span', { className: 'menu-arrow' }, '▶');
         arrow.setAttribute('aria-hidden', 'true');
         btn.appendChild(arrow);
         const openSub = (): HTMLElement | undefined => {
@@ -134,10 +165,17 @@ export class ContextMenu {
           item.action?.();
         });
       }
-      list.appendChild(btn);
+      column.appendChild(btn);
     }
     this.root.appendChild(list);
     this.levels.push(list);
+    // フォアグラウンド画像は、メニューの背景と同じ位置の部分を選んだ項目に見せる
+    if (skin?.alignForeground) {
+      for (const btn of this.items(list)) {
+        btn.style.setProperty('--row-left', `${btn.offsetLeft}px`);
+        btn.style.setProperty('--row-top', `${btn.offsetTop}px`);
+      }
+    }
     return list;
   }
 
@@ -214,6 +252,22 @@ export class ContextMenu {
           this.closeLevel(depth);
         }
         break;
+      default: {
+        // アクセスキー。同じ文字が複数あれば順に移るだけ、1つならそれを選ぶ (Windows のメニューと同じ)
+        if (e.ctrlKey || e.metaKey || e.altKey) break;
+        // 日本語入力が有効なときは e.key が "Process" になるので、物理キーの文字で読む
+        const k = e.key.length === 1 ? e.key.toLowerCase() : /^Key([A-Z])$/.exec(e.code)?.[1].toLowerCase();
+        if (!k) break;
+        const matches = items.filter((b) => b.dataset.key === k);
+        if (matches.length === 0) break;
+        handled();
+        if (matches.length === 1) {
+          matches[0].focus();
+          matches[0].click();
+        } else {
+          matches[(matches.indexOf(current as HTMLElement) + 1) % matches.length].focus();
+        }
+      }
     }
   }
 

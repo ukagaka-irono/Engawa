@@ -136,7 +136,7 @@ export class BalloonSkin {
     const cursor = value('cursor.style') ?? '';
     return {
       fontFamily: font ? `"${font.replace(/"/g, '')}", var(--font-balloon)` : 'var(--font-balloon)',
-      fontSize: this.num(kind, id, rightSide, 'font.height') ?? 13,
+      fontSize: this.num(kind, id, rightSide, 'font.height') ?? 12,
       fontBold: value('font.bold') === '1',
       color: this.rgb(kind, id, rightSide, 'font.color', 'var(--balloon-text)'),
       anchorColor: this.rgb(kind, id, rightSide, 'anchor.font.color', 'var(--balloon-anchor)'),

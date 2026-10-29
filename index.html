@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="ブラウザで動く伺かベースウェア" />
     <title>Engawa</title>
-    <!-- 色は styles.css の --accent / --accent-text と同じ -->
+    <!-- 色は styles.css の .tray-icon と同じ -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23a85f33'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='%23fffaf3' font-family='Hiragino Mincho ProN, Yu Mincho, Noto Serif JP, serif'%3E縁%3C/text%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
@@ -15,12 +15,23 @@
       <div class="desktop"></div>
       <div class="overlay">
         <section class="empty-state" aria-labelledby="empty-title" hidden>
-          <h2 class="empty-title" id="empty-title">ゴーストが起動していません</h2>
-          <p class="empty-text">.nar / .zip ファイルやゴーストのフォルダをここにドロップすると、インストールできます。</p>
-          <button type="button" class="btn btn-primary">ゴーストを起動</button>
+          <div class="empty-titlebar" aria-hidden="true">Engawa</div>
+          <div class="empty-body">
+            <h2 class="empty-title" id="empty-title">ゴーストが起動していません</h2>
+            <p class="empty-text">.nar / .zip ファイルやゴーストのフォルダをここにドロップすると、インストールできます。</p>
+            <div class="empty-actions"><button type="button" class="btn btn-primary">ゴーストを起動</button></div>
+          </div>
         </section>
         <div class="drop-hint" hidden><p>ドロップしてインストール</p></div>
-        <button type="button" class="tray-button" aria-label="メニュー" title="メニュー" aria-haspopup="menu" aria-expanded="false">縁</button>
+        <!-- Windows のタスクバー。右端の通知領域にトレイアイコンと時計 -->
+        <footer class="taskbar">
+          <div class="taskbar-tray">
+            <button type="button" class="tray-button" aria-label="メニュー" title="Engawa" aria-haspopup="menu" aria-expanded="false">
+              <span class="tray-icon" aria-hidden="true">縁</span>
+            </button>
+            <time class="taskbar-clock"></time>
+          </div>
+        </footer>
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>

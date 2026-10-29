@@ -1,5 +1,6 @@
-/** <dialog> を使った画面部品 (確認・入力ボックス・情報・オプション・パッケージ管理) と通知。 */
+/** <dialog> を使った画面部品 (確認・入力ボックス・情報・オプション・パッケージ管理・ヘルプ) と通知。 */
 import { el, uniqueId } from './dom';
+import { renderMarkdown } from './markdown';
 
 export type ButtonKind = 'primary' | 'secondary' | 'danger' | 'icon';
 
@@ -33,16 +34,24 @@ interface DialogParts {
   titleId: string;
 }
 
-/** すべてのモーダルはここから作る。見出しがダイアログの名前になる。 */
+/**
+ * すべてのモーダルはここから作る。Windows のウィンドウのように、タイトルバーの見出しがダイアログの名前になり、
+ * 右端の × で閉じる (Escape と同じ。Tab の順には入れない)。
+ */
 function dialog(className: string, title: string, container: 'div' | 'form' = 'div'): DialogParts {
   const titleId = uniqueId('dialog-title');
   const root = el('dialog', { className: `dialog ${className}` });
   root.setAttribute('aria-labelledby', titleId);
   const frame = el(container, { className: 'dialog-frame' });
   const heading = el('h2', { className: 'dialog-title', id: titleId }, title);
+  const titlebar = el('div', { className: 'dialog-titlebar' }, heading);
   const body = el('div', { className: 'dialog-body' });
   const actions = el('div', { className: 'dialog-actions' });
-  frame.append(heading, body, actions);
+  // × は最後に置いてタイトルバーへ重ねる (開いたときの最初のフォーカスが本文の入力欄やボタンに来るように)
+  const close = button('✕', 'icon', () => root.close(), { ariaLabel: '閉じる' });
+  close.classList.add('dialog-close');
+  close.tabIndex = -1;
+  frame.append(titlebar, body, actions, close);
   root.appendChild(frame);
   document.body.appendChild(root);
   root.addEventListener('close', () => root.remove());
@@ -213,7 +222,7 @@ export class Toasts {
         }),
       );
     }
-    toast.appendChild(button('×', 'icon', remove, { ariaLabel: '閉じる' }));
+    toast.appendChild(button('✕', 'icon', remove, { ariaLabel: '閉じる' }));
     this.box.appendChild(toast);
     if (document.querySelector('dialog[open]')) this.enterTopLayer();
     arm();
@@ -402,4 +411,19 @@ export function showPackages(packages: PackageRow[], on: { uninstall(row: Packag
   const close = button('閉じる', 'primary', () => root.close());
   actions.appendChild(close);
   root.showModal();
+}
+
+/** ヘルプ (README を読みやすくしたもの) */
+export function showHelp(markdown: string): void {
+  const { root, body, actions, titleId } = dialog('help-dialog', 'ヘルプ');
+  body.appendChild(renderMarkdown(markdown));
+  // 本文は読むだけなので、キーボードでもスクロールできるようフォーカスを受ける (読み上げではヘルプの本文と分かるように)
+  body.tabIndex = 0;
+  body.setAttribute('role', 'document');
+  body.setAttribute('aria-labelledby', titleId);
+  const close = button('閉じる', 'primary', () => root.close());
+  actions.appendChild(close);
+  root.showModal();
+  body.scrollTop = 0;
+  close.focus();
 }

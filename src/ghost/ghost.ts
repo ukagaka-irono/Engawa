@@ -1087,6 +1087,19 @@ export class Ghost implements PlayerHost {
     return url;
   }
 
+  /** いまのシェルのフォルダにあるファイルの URL (メニューの画像など) */
+  shellFileUrl(path: string): string | undefined {
+    const p = joinPath(`shell/${this.shell.dir}`, normalizePath(path));
+    const data = this.files.get(p);
+    if (!data) return undefined;
+    let url = this.blobUrls.get(p);
+    if (!url) {
+      url = URL.createObjectURL(new Blob([data as BlobPart]));
+      this.blobUrls.set(p, url);
+    }
+    return url;
+  }
+
   playSound(file: string, loop = false): void {
     const url = this.blobUrl(file);
     if (!url) return;
