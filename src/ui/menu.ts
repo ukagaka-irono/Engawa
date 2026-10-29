@@ -40,9 +40,12 @@ export class ContextMenu {
 
   constructor(parent: HTMLElement) {
     parent.appendChild(this.root);
-    this.root.addEventListener('pointerdown', (e) => {
+    // 外側を押したら閉じる (Pointer Events の無いブラウザもあるのでマウスとタッチで受ける)
+    const outside = (e: Event) => {
       if (e.target === this.root) this.close();
-    });
+    };
+    this.root.addEventListener('mousedown', outside);
+    this.root.addEventListener('touchstart', outside, { passive: true });
     this.root.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       if (e.target === this.root) this.close();
@@ -152,13 +155,13 @@ export class ContextMenu {
           this.position(sub, 0, 0, btn);
           return sub;
         };
-        btn.addEventListener('pointerenter', () => void openSub());
+        btn.addEventListener('mouseenter', () => void openSub());
         btn.addEventListener('click', () => {
           const sub = openSub();
           if (sub) this.items(sub)[0]?.focus();
         });
       } else {
-        btn.addEventListener('pointerenter', () => this.trim(depth + 1));
+        btn.addEventListener('mouseenter', () => this.trim(depth + 1));
         btn.addEventListener('click', () => {
           if (disabled) return;
           this.close();

@@ -1,4 +1,5 @@
 /** ベースウェアの設定。ブラウザの localStorage に保存する (使えない環境では保存しない)。 */
+import { clone } from '../util/clone';
 
 export interface CharacterPosition {
   right: number;
@@ -46,7 +47,7 @@ function load(): Settings {
   } catch {
     // 保存領域が使えない (プライベートモード等)
   }
-  return structuredClone(DEFAULTS);
+  return clone(DEFAULTS);
 }
 
 export const settings: Settings = load();

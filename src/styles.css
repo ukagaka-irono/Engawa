@@ -1,4 +1,8 @@
 /*
+ * 対応ブラウザ: Firefox、Chrome (Android を含む)、Safari (iOS 12 以降)。
+ * Safari 12 に無いもの (inset、flex の gap、:is()、空白区切りの rgb()) は使わない。
+ * Safari 12 は知らないセレクタ (:focus-visible) を含む規則を丸ごと捨てるので、それは単独の規則に分ける。
+ *
  * 共有の値はすべてここ (:root) に置く。
  * 見た目は SSP (Windows 上のベースウェア) に合わせる。SSP のオーナードローメニューや Win32 のダイアログは
  * OS のダークモードでも明るいままなので、ここでも明るい配色だけを持つ (タスクバーは Windows 既定の暗色)。
@@ -59,7 +63,7 @@
   --button-hover: #e5f1fb;
   --accent: #0078d7;
   /* ドロップの案内 (白文字が明るいデスクトップの上でも読める濃さ) */
-  --drop-hint-bg: rgb(0 84 153 / 0.8);
+  --drop-hint-bg: rgba(0, 84, 153, 0.8);
   --danger: #c42b1c;
   --disabled-text: #8c8c8c;
   --disabled-fill: #cccccc;
@@ -70,8 +74,8 @@
   --accent-text: #ffffff;
   --focus: #0078d7;
   --link: #0066cc;
-  --shadow: 0 0 24px rgb(0 0 0 / 0.35);
-  --backdrop: rgb(0 0 0 / 0.25);
+  --shadow: 0 0 24px rgba(0, 0, 0, 0.35);
+  --backdrop: rgba(0, 0, 0, 0.25);
 
   /* SSP の既定のオーナードローメニュー (シェルの menu.* で上書きされる) */
   --menu-bg: #ffffff;
@@ -84,7 +88,7 @@
   --menu-sidebar-top: #7ea9e3;
   --menu-sidebar-bottom: #1f4f9e;
   --menu-sidebar-text: #ffffff;
-  --menu-shadow: 2px 2px 4px rgb(0 0 0 / 0.3);
+  --menu-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 
   /* Windows のタスクバー */
   --taskbar: #202020;
@@ -99,7 +103,7 @@
   --balloon-cursor-bg: #316ac5;
   --balloon-cursor-text: #ffffff;
   --balloon-focus: #0078d7;
-  --balloon-shadow: 2px 2px 3px rgb(0 0 0 / 0.25);
+  --balloon-shadow: 2px 2px 3px rgba(0, 0, 0, 0.25);
   --balloon-radius: 8px;
 }
 
@@ -142,6 +146,7 @@ html.over-character * {
   margin: -1px;
   padding: 0;
   overflow: hidden;
+  clip: rect(0 0 0 0);
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
@@ -166,9 +171,13 @@ html.over-character * {
  */
 .desktop {
   position: fixed;
-  inset: 0 0 calc(var(--taskbar-height) + env(safe-area-inset-bottom)) 0;
+  top: 0;
+  right: 0;
+  bottom: calc(var(--taskbar-height) + env(safe-area-inset-bottom));
+  left: 0;
   overflow: hidden;
   pointer-events: none;
+  -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -214,7 +223,10 @@ html.over-character * {
 
 .balloon-inner > canvas {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
 }
 
 /* 画像を持たない内蔵バルーン */
@@ -256,6 +268,7 @@ html.over-character * {
   overflow-y: auto;
   scrollbar-width: none;
   line-height: var(--b-line);
+  word-wrap: break-word;
   overflow-wrap: anywhere;
   word-break: break-all;
   white-space: pre-wrap;
@@ -309,17 +322,24 @@ html.over-character * {
 }
 
 /* 選択肢のカーソルはスキンの指定どおり。キーボードのフォーカスはそれに点線を足す */
-.balloon[data-cursor='square'] .choice:is(:hover, :focus-visible) {
+.balloon[data-cursor='square'] .choice:hover,
+.balloon[data-cursor='square'] .choice:focus {
   background: var(--b-cursor-bg);
   color: var(--b-cursor-color);
 }
 
-.balloon[data-cursor='underline'] .choice:is(:hover, :focus-visible) {
+.balloon[data-cursor='underline'] .choice:hover,
+.balloon[data-cursor='underline'] .choice:focus {
   text-decoration: underline;
   color: var(--b-cursor-color);
 }
 
-.balloon :is(.choice, .anchor):focus-visible {
+.balloon .choice:focus-visible {
+  outline: 1px dotted var(--balloon-focus);
+  outline-offset: 0;
+}
+
+.balloon .anchor:focus-visible {
   outline: 1px dotted var(--balloon-focus);
   outline-offset: 0;
 }
@@ -328,7 +348,10 @@ html.over-character * {
 
 .overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 10;
   pointer-events: none;
 }
@@ -355,8 +378,11 @@ html.over-character * {
 .taskbar-tray {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
   padding: 0 max(var(--space-2), env(safe-area-inset-right)) 0 var(--space-2);
+}
+
+.taskbar-tray > * + * {
+  margin-left: var(--space-1);
 }
 
 .tray-button {
@@ -449,8 +475,10 @@ html.over-character * {
 
 .drop-hint {
   position: absolute;
-  inset: max(var(--space-4), env(safe-area-inset-top)) max(var(--space-4), env(safe-area-inset-right))
-    calc(var(--taskbar-height) + env(safe-area-inset-bottom) + var(--space-4)) max(var(--space-4), env(safe-area-inset-left));
+  top: max(var(--space-4), env(safe-area-inset-top));
+  right: max(var(--space-4), env(safe-area-inset-right));
+  bottom: calc(var(--taskbar-height) + env(safe-area-inset-bottom) + var(--space-4));
+  left: max(var(--space-4), env(safe-area-inset-left));
   display: grid;
   place-items: center;
   border: 2px dashed var(--accent-text);
@@ -466,7 +494,10 @@ html.over-character * {
 /* 通知 (.toasts) より上に重ねる */
 .menu-layer {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 2;
 }
 
@@ -507,6 +538,7 @@ html.over-character * {
 
 .menu-sidebar-text {
   padding: var(--space-2) 0;
+  -webkit-writing-mode: vertical-rl;
   writing-mode: vertical-rl;
   transform: rotate(180deg);
 }
@@ -537,7 +569,9 @@ html.over-character * {
 }
 
 /* 選ばれている項目はフォアグラウンド (シェルの画像があれば、メニューと同じ位置の部分を見せる) */
-.menu-item:is(:hover, :focus-visible):not([aria-disabled='true']),
+/* メニューの項目はフォーカスを持ったものが選ばれている項目 (Windows と同じ) なので :focus で塗る */
+.menu-item:hover:not([aria-disabled='true']),
+.menu-item:focus:not([aria-disabled='true']),
 .menu-item[aria-expanded='true'] {
   background-color: var(--menu-fg-bg);
   background-image: var(--m-fg-image, none);
@@ -681,6 +715,34 @@ html.over-character * {
   background: var(--backdrop);
 }
 
+/* dialog-polyfill (<dialog> の無いブラウザ) で開いたダイアログと、その背景 */
+.dialog-polyfilled {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  transform: translate(-50%, -50%);
+}
+
+.dialog-polyfilled:not([open]) {
+  display: none;
+}
+
+.dialog-polyfilled + .backdrop,
+._dialog_overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.dialog-polyfilled + .backdrop {
+  background: var(--backdrop);
+}
+
 .dialog-frame {
   position: relative;
   display: flex;
@@ -748,8 +810,11 @@ html.over-character * {
   flex: none;
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-2);
   padding: var(--space-4);
+}
+
+.dialog-actions > * + * {
+  margin-left: var(--space-2);
 }
 
 .field {
@@ -780,6 +845,7 @@ html.over-character * {
 
 .info-list dd {
   margin: 0;
+  word-wrap: break-word;
   overflow-wrap: anywhere;
   line-height: var(--leading);
 }
@@ -795,9 +861,12 @@ html.over-character * {
 .package-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   min-height: calc(var(--control-height) + var(--space-2));
   padding: 0 var(--space-2);
+}
+
+.package-row > * + * {
+  margin-left: var(--space-2);
 }
 
 .package-row + .package-row {
@@ -916,7 +985,9 @@ html.over-character * {
 .toasts {
   position: fixed;
   z-index: 1;
-  inset: auto;
+  /* ポップオーバーの既定 (四辺 0) を戻す */
+  right: auto;
+  bottom: auto;
   left: 50%;
   top: max(var(--space-4), env(safe-area-inset-top));
   transform: translateX(-50%);
@@ -935,7 +1006,6 @@ html.over-character * {
 .toast {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   padding: var(--space-2) 0 var(--space-2) var(--space-3);
   background: var(--window);
   border: 1px solid var(--window-frame);
@@ -945,6 +1015,10 @@ html.over-character * {
 
 .toast-error {
   border-left: 4px solid var(--danger);
+}
+
+.toast > * + * {
+  margin-left: var(--space-2);
 }
 
 .toast-text {

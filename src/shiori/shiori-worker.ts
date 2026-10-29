@@ -4,7 +4,11 @@
  */
 import { decodeText, encodeText } from '../util/text';
 import { normalizePath } from '../vfs/files';
+import { runModuleScript } from './module-script';
 import type { FromWorker, ToWorker } from './worker-protocol';
+
+// globalThis は Safari 12.1 から。SHIORI が globalThis.engawa と書けるように
+if (typeof globalThis === 'undefined') (self as unknown as { globalThis: unknown }).globalThis = self;
 
 interface ShioriModule {
   load?(dir: string): unknown;
@@ -18,19 +22,40 @@ const ctx = self as unknown as {
 };
 
 const files = new Map<string, Uint8Array>();
-const moduleUrls = new Map<string, string>();
+const modules = new Map<string, Promise<unknown>>();
 let shiori: ShioriModule | undefined;
+
+/**
+ * Worker の中で import() が動くか。Safari 14 以前などは構文ごと知らないので、文字列から関数を作って試す
+ * (失敗しても Worker 全体は読み込める)。動かなければ module-script.ts で書き換えて動かす。
+ */
+const nativeImport: Promise<((url: string) => Promise<unknown>) | undefined> = (async () => {
+  try {
+    const load = new Function('url', 'return import(url)') as (url: string) => Promise<unknown>;
+    const probe = URL.createObjectURL(new Blob(['export const ok = 1;'], { type: 'text/javascript' }));
+    try {
+      const mod = (await load(probe)) as { ok?: number };
+      return mod.ok === 1 ? load : undefined;
+    } finally {
+      URL.revokeObjectURL(probe);
+    }
+  } catch {
+    return undefined;
+  }
+})();
 
 function importModule(path: string): Promise<unknown> {
   const p = normalizePath(path);
-  let url = moduleUrls.get(p);
-  if (!url) {
+  let mod = modules.get(p);
+  if (!mod) {
     const data = files.get(p);
     if (!data) return Promise.reject(new Error(`module not found: ${path}`));
-    url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'text/javascript' }));
-    moduleUrls.set(p, url);
+    mod = nativeImport.then((load) =>
+      load ? load(URL.createObjectURL(new Blob([data as BlobPart], { type: 'text/javascript' }))) : runModuleScript(decodeText(data, 'utf-8'), p),
+    );
+    modules.set(p, mod);
   }
-  return import(/* @vite-ignore */ url);
+  return mod;
 }
 
 const host = {
@@ -53,7 +78,7 @@ const host = {
   log: (...args: unknown[]) => ctx.postMessage({ type: 'log', message: args.map(String).join(' ') }),
   importModule,
 };
-(globalThis as unknown as { engawa: typeof host }).engawa = host;
+(self as unknown as { engawa: typeof host }).engawa = host;
 
 ctx.onmessage = async (e) => {
   const msg = e.data;

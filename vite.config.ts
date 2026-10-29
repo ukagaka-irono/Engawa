@@ -40,6 +40,10 @@ export default defineConfig({
   assetsInclude: ['**/*.nar'],
   plugins: [singleFile()],
   build: {
+    // 対応ブラウザ: Firefox、Chrome (Android を含む)、Safari (iOS 12 以降)。
+    // ?. や ?? などの新しい構文は Safari 12 が読める書き方に直す (足りない API は src/compat.ts で補う)
+    target: ['es2018', 'safari12', 'ios12', 'firefox78', 'chrome70'],
+    cssTarget: ['safari12', 'ios12', 'firefox78', 'chrome70'],
     // サンプルゴーストなどの素材も data: URL として埋め込む
     assetsInlineLimit: Number.MAX_SAFE_INTEGER,
     cssCodeSplit: false,

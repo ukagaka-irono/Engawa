@@ -14,9 +14,9 @@ describe('menuSkin', () => {
       ['menu.background.font.color.r,10', 'menu.background.font.color.g,20', 'menu.background.font.color.b,30', 'menu.frame.color.r,300'].join('\n'),
     );
     const skin = await menuSkin(d, url);
-    expect(skin?.vars['--m-text']).toBe('rgb(10 20 30)');
-    expect(skin?.vars['--m-separator']).toBe('rgb(10 20 30)');
-    expect(skin?.vars['--m-frame']).toBe('rgb(255 0 0)');
+    expect(skin?.vars['--m-text']).toBe('rgb(10, 20, 30)');
+    expect(skin?.vars['--m-separator']).toBe('rgb(10, 20, 30)');
+    expect(skin?.vars['--m-frame']).toBe('rgb(255, 0, 0)');
   });
 
   it('画像と揃え方', async () => {

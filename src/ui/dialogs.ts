@@ -1,4 +1,5 @@
 /** <dialog> を使った画面部品 (確認・入力ボックス・情報・オプション・パッケージ管理・ヘルプ) と通知。 */
+import dialogPolyfill from 'dialog-polyfill';
 import { el, uniqueId } from './dom';
 import { renderMarkdown } from './markdown';
 
@@ -54,6 +55,11 @@ function dialog(className: string, title: string, container: 'div' | 'form' = 'd
   frame.append(titlebar, body, actions, close);
   root.appendChild(frame);
   document.body.appendChild(root);
+  // <dialog> の無いブラウザ (Safari 15.3 以前) では dialog-polyfill で同じように動かす (見た目は .dialog-polyfilled)
+  if (typeof HTMLDialogElement !== 'function') {
+    dialogPolyfill.registerDialog(root);
+    root.classList.add('dialog-polyfilled');
+  }
   root.addEventListener('close', () => root.remove());
   return { root, body, actions, titleId };
 }
@@ -178,7 +184,8 @@ export class Toasts {
     document.addEventListener(
       'close',
       (e) => {
-        if (e.target instanceof HTMLDialogElement && !document.querySelector('dialog[open]')) this.leaveTopLayer();
+        // HTMLDialogElement の無いブラウザもあるので要素名で見る
+        if (e.target instanceof Element && e.target.localName === 'dialog' && !document.querySelector('dialog[open]')) this.leaveTopLayer();
       },
       true,
     );
@@ -202,11 +209,11 @@ export class Toasts {
       timer = window.setTimeout(remove, duration);
     };
     // 読んでいる間・操作している間は消さない
-    toast.addEventListener('pointerenter', () => {
+    toast.addEventListener('mouseenter', () => {
       hovered = true;
       clearTimeout(timer);
     });
-    toast.addEventListener('pointerleave', () => {
+    toast.addEventListener('mouseleave', () => {
       hovered = false;
       if (!toast.contains(document.activeElement)) arm();
     });

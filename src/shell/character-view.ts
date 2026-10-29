@@ -1,6 +1,17 @@
 import type { CharacterLayer } from './character-layer';
 import type { SurfaceRenderer } from './renderer';
 
+/** 位置とボタンが分かれば足りるマウス・タッチの入力 (MouseEvent / PointerEvent、またはそれらから作ったもの) */
+export type MouseLike = Pick<MouseEvent, 'clientX' | 'clientY' | 'button'>;
+
+/** CharacterLayer が渡す入力。Pointer Events の無いブラウザではマウス・タッチの event から作る */
+export interface PointerInput extends MouseLike {
+  pointerId: number;
+  /** 'mouse' | 'touch' | 'pen' */
+  pointerType: string;
+  target: EventTarget | null;
+}
+
 export type MouseButton = 0 | 1 | 2; // SHIORI の Reference5: 0 左, 1 右, 2 中
 
 export interface CharacterMouseEvent {
@@ -131,7 +142,7 @@ export class CharacterView {
     return this.renderer.opaqueAt((clientX - box.left) / this.scale, (clientY - box.top) / this.scale);
   }
 
-  private event(e: MouseEvent, wheel = 0): CharacterMouseEvent {
+  private event(e: MouseLike, wheel = 0): CharacterMouseEvent {
     const box = this.renderer.canvas.getBoundingClientRect();
     const x = (e.clientX - box.left) / this.scale;
     const y = (e.clientY - box.top) / this.scale;
@@ -149,12 +160,17 @@ export class CharacterView {
 
   // ---------------------------------------------------------------- CharacterLayer から呼ばれる
 
-  pointerDown(e: PointerEvent): void {
+  /** 押している間に、ドラッグとみなすほど動かしたか */
+  get dragged(): boolean {
+    return this.drag?.moved ?? false;
+  }
+
+  pointerDown(e: PointerInput): void {
     this.on.pointerDown();
     if (e.button === 0) this.drag = { x: e.clientX, y: e.clientY, right: this.right, bottom: this.bottom, moved: false };
   }
 
-  dragMove(e: PointerEvent): void {
+  dragMove(e: PointerInput): void {
     const drag = this.drag;
     if (!drag) return;
     const dx = e.clientX - drag.x;
@@ -168,7 +184,7 @@ export class CharacterView {
   }
 
   /** ドラッグせずに離したらクリック */
-  pointerUp(e: PointerEvent, cancelled: boolean): void {
+  pointerUp(e: PointerInput, cancelled: boolean): void {
     const drag = this.drag;
     this.drag = undefined;
     this.el.classList.remove('dragging');
@@ -181,30 +197,30 @@ export class CharacterView {
     if (!cancelled && this.hit(e.clientX, e.clientY)) this.click(e);
   }
 
-  click(e: MouseEvent): void {
+  click(e: MouseLike): void {
     this.on.click(this.event(e));
   }
 
-  hoverMove(e: PointerEvent): void {
+  hoverMove(e: PointerInput): void {
     const now = performance.now();
     if (now - this.lastMove < MOVE_THROTTLE_MS) return;
     this.lastMove = now;
     this.on.move(this.event(e));
   }
 
-  enter(e: PointerEvent): void {
+  enter(e: PointerInput): void {
     this.on.enter(this.event(e));
   }
 
-  leave(e: PointerEvent): void {
+  leave(e: PointerInput): void {
     this.on.leave(this.event(e));
   }
 
-  doubleClick(e: MouseEvent): void {
+  doubleClick(e: MouseLike): void {
     this.on.doubleClick(this.event(e));
   }
 
-  contextMenu(e: MouseEvent): void {
+  contextMenu(e: MouseLike): void {
     const ev = this.event(e);
     ev.button = 1;
     this.on.click(ev);

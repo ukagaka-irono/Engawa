@@ -16,7 +16,7 @@ function color(d: Descript, key: string): string | undefined {
   const parts = ['r', 'g', 'b'].map((c) => d.get(`${key}.${c}`));
   if (parts.every((p) => p === undefined)) return undefined;
   const [r, g, b] = parts.map((p) => Math.min(255, Math.max(0, Number(p) || 0)));
-  return `rgb(${r} ${g} ${b})`;
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 /** lefttop / centerbottom / rightcenter+repeat-x などを background-position / repeat にする */

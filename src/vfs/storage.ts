@@ -1,3 +1,4 @@
+import { clone } from '../util/clone';
 import { FileTree, basename, normalizePath } from './files';
 
 export type PackageKind = 'ghost' | 'balloon';
@@ -151,14 +152,14 @@ function prefixRange(key: string, prefix: string): IDBKeyRange {
 }
 
 export async function listPackages(): Promise<PackageMeta[]> {
-  if (await inMemory()) return [...memory.packages.values()].map((m) => structuredClone(m));
+  if (await inMemory()) return [...memory.packages.values()].map((m) => clone(m));
   return run(['packages'], 'readonly', (tx) => result(tx.objectStore('packages').getAll() as IDBRequest<PackageMeta[]>));
 }
 
 export async function getPackage(key: string): Promise<PackageMeta | undefined> {
   if (await inMemory()) {
     const meta = memory.packages.get(key);
-    return meta && structuredClone(meta);
+    return meta && clone(meta);
   }
   return run(['packages'], 'readonly', (tx) => result(tx.objectStore('packages').get(key) as IDBRequest<PackageMeta | undefined>));
 }
@@ -169,7 +170,7 @@ export async function getPackage(key: string): Promise<PackageMeta | undefined> 
  */
 export async function putPackage(meta: PackageMeta, files: FileTree, prefix = '', refresh?: Refresh): Promise<void> {
   if (await inMemory()) {
-    memory.packages.set(meta.key, structuredClone(meta));
+    memory.packages.set(meta.key, clone(meta));
     const stored = memoryFiles(meta.key);
     if (refresh) {
       const keep = new Set(refresh.keep.map((n) => normalizePath(n)));
@@ -226,10 +227,10 @@ export async function patchPackageMeta(
   if (await inMemory()) {
     const current = memory.packages.get(key);
     if (!current) return undefined;
-    if (keep(current)) return structuredClone(current);
+    if (keep(current)) return clone(current);
     const next = { ...current, ...patch, key };
     memory.packages.set(key, next);
-    return structuredClone(next);
+    return clone(next);
   }
   return run(['packages'], 'readwrite', async (tx) => {
     const store = tx.objectStore('packages');

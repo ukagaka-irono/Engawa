@@ -16,8 +16,31 @@ export function parseAlphaMode(value: string | undefined): AlphaMode {
   return 'off';
 }
 
-export async function decodeImage(data: Uint8Array): Promise<ImageBitmap> {
-  return createImageBitmap(new Blob([data as BlobPart]));
+/** 読み込んだ画像。使い終わったら close() する */
+export interface DecodedImage {
+  image: CanvasImageSource & { width: number; height: number };
+  close(): void;
+}
+
+/** createImageBitmap の無いブラウザ (Safari 14 以前) では <img> で読む */
+export async function decodeImage(data: Uint8Array): Promise<DecodedImage> {
+  const blob = new Blob([data as BlobPart]);
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob);
+    return { image: bitmap, close: () => bitmap.close() };
+  }
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('画像を読めませんでした'));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  return { image: img, close: () => {} };
 }
 
 /** PNG がアルファを持つか (カラータイプ 4/6、または tRNS チャンクがある) */
@@ -52,7 +75,7 @@ function toCanvas(img: CanvasImageSource & { width: number; height: number }): H
  * - off でも、左上のピクセルが既に透明なアルファ付き画像はそのまま使う (作者の意図が明らかなため)
  * - それ以外は左上のピクセルと同じ色を透明色にする
  */
-export function applyTransparency(img: ImageBitmap, pna: ImageBitmap | undefined, mode: AlphaMode, hasAlpha: boolean): Bitmap {
+export function applyTransparency(img: DecodedImage['image'], pna: DecodedImage['image'] | undefined, mode: AlphaMode, hasAlpha: boolean): Bitmap {
   const canvas = toCanvas(img);
   if (mode === 'none') return canvas;
   if (!pna && (mode === 'full' || (mode === 'on' && hasAlpha))) return canvas;
@@ -79,7 +102,7 @@ export function applyTransparency(img: ImageBitmap, pna: ImageBitmap | undefined
 export async function loadTransparentImage(data: Uint8Array, pnaData: Uint8Array | undefined, mode: AlphaMode): Promise<Bitmap> {
   const [img, pna] = await Promise.all([decodeImage(data), pnaData ? decodeImage(pnaData) : Promise.resolve(undefined)]);
   try {
-    return applyTransparency(img, pna, mode, pngHasAlpha(data));
+    return applyTransparency(img.image, pna?.image, mode, pngHasAlpha(data));
   } finally {
     img.close();
     pna?.close();

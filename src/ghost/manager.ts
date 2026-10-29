@@ -719,7 +719,7 @@ export class GhostManager implements GhostEnv {
     const draw = () => {
       const now = new Date();
       const date = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
-      clock.dateTime = `${date.replaceAll('/', '-')}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      clock.dateTime = `${date.replace(/\//g, '-')}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
       clock.replaceChildren(el('span', {}, `${now.getHours()}:${pad(now.getMinutes())}`), el('span', {}, date));
       window.setTimeout(draw, 60_000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 50);
     };

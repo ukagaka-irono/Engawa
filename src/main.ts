@@ -1,3 +1,4 @@
+import './compat';
 import README from '../README.md?raw';
 import { GhostManager } from './ghost/manager';
 import { renderMarkdown } from './ui/markdown';
