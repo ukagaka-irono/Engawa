@@ -37,7 +37,7 @@ function singleFile(): Plugin {
 
 export default defineConfig({
   base: './',
-  assetsInclude: ['**/*.nar'],
+  assetsInclude: ['**/*.nar', '**/*.wasm.gz'],
   plugins: [singleFile()],
   build: {
     // 対応ブラウザ: Firefox、Chrome (Android を含む)、Safari (iOS 12 以降)。

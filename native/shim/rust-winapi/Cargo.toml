@@ -1,0 +1,20 @@
+# Windows 専用の Rust 製 SHIORI (minato など) を WebAssembly にするための、winapi 0.3 の代わり。
+# native/build.mjs が [patch.crates-io] で差し替える。使われているものだけを、malloc/free の上に作る
+[package]
+name = "winapi"
+version = "0.3.9"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+# 本物の winapi の feature 名を受け付けるだけ (中身はいつも全部ある)
+[features]
+winbase = []
+minwindef = []
+consoleapi = []
+processenv = []
+wincon = []
+libloaderapi = []
+winnt = []

@@ -1,6 +1,8 @@
 import type { Descript } from '../package/descript';
 import type { FileTree } from '../vfs/files';
 import { JsShiori } from './js-shiori';
+import { detectNativeEngine } from './native-detect';
+import { NativeShiori } from './native-shiori';
 import { UnsupportedShiori } from './unsupported-shiori';
 
 export interface ShioriHooks {
@@ -19,12 +21,14 @@ export interface Shiori {
 
 /**
  * ゴーストの descript.txt の `shiori` 指定から SHIORI を作る。
- * ブラウザでは DLL を読めないため、JavaScript モジュール (.js / .mjs) のみ実行できる。
+ * JavaScript モジュール (.js / .mjs) はそのまま、DLL は WebAssembly にした版 (native/) があればそれで動かす。
  */
 export function createShiori(files: FileTree, descript: Descript, hooks: ShioriHooks): Shiori {
   const name = descript.str('shiori', 'shiori.dll');
   if (/\.m?js$/i.test(name) && files.has(`ghost/master/${name}`)) {
     return new JsShiori(files, name, hooks);
   }
+  const engine = detectNativeEngine(name, files);
+  if (engine) return new NativeShiori(files, name, engine, hooks);
   return new UnsupportedShiori(name);
 }

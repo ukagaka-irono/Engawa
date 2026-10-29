@@ -945,6 +945,14 @@ html.over-character * {
   border: 1px solid var(--rule);
 }
 
+.license-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .doc pre code {
   padding: 0;
   background: none;

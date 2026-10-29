@@ -420,6 +420,21 @@ export function showPackages(packages: PackageRow[], on: { uninstall(row: Packag
   root.showModal();
 }
 
+/** ライセンス (組み込んでいる SHIORI とライブラリの著作権表示・条文) */
+export function showLicenses(text: string): void {
+  const { root, body, actions, titleId } = dialog('help-dialog', 'ライセンス');
+  body.appendChild(el('pre', { className: 'license-text' }, text));
+  // 本文は読むだけなので、キーボードでもスクロールできるようフォーカスを受ける
+  body.tabIndex = 0;
+  body.setAttribute('role', 'document');
+  body.setAttribute('aria-labelledby', titleId);
+  const close = button('閉じる', 'primary', () => root.close());
+  actions.appendChild(close);
+  root.showModal();
+  body.scrollTop = 0;
+  close.focus();
+}
+
 /** ヘルプ (README を読みやすくしたもの) */
 export function showHelp(markdown: string): void {
   const { root, body, actions, titleId } = dialog('help-dialog', 'ヘルプ');

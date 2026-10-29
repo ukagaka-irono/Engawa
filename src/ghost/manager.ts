@@ -3,7 +3,8 @@ import { Descript } from '../package/descript';
 import { acceptNamesOf, InstallError, installFiles, type InstallResult, type InstallTarget } from '../package/installer';
 import { CharacterLayer } from '../shell/character-layer';
 import { Shell } from '../shell/shell';
-import { InputBox, packageKindLabel, showHelp, showInfo, showOptions, showPackages, Toasts } from '../ui/dialogs';
+import { InputBox, packageKindLabel, showHelp, showInfo, showLicenses, showOptions, showPackages, Toasts } from '../ui/dialogs';
+import { licenseText } from '../ui/licenses';
 import { el } from '../ui/dom';
 import { menuSkin } from '../ui/menu-skin';
 import { ContextMenu, type MenuItem } from '../ui/menu';
@@ -608,6 +609,7 @@ export class GhostManager implements GhostEnv {
     items.push({ label: 'オプション…', key: 'O', action: () => this.openOptions() });
     items.push({ separator: true });
     items.push({ label: 'ヘルプ…', key: 'H', action: () => showHelp(README) });
+    items.push({ label: 'ライセンス…', key: 'L', action: () => showLicenses(licenseText()) });
     items.push({ label: '情報…', key: 'A', action: () => this.openInfo(g) });
     if (g || this.ghosts.length > 1) items.push({ separator: true });
     if (g) items.push({ label: `「${g.name}」を閉じる`, key: 'X', action: () => void this.closeGhost(g) });

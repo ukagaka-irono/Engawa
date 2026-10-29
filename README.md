@@ -41,7 +41,7 @@ Internet Explorer には対応していません。
 | 分野 | 対応しているもの |
 |---|---|
 | パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory` と番号付きの `balloonN.directory` 同梱)、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む) |
-| SHIORI | SHIORI/3.0 (GET / NOTIFY)、JavaScript 製 SHIORI (Web Worker 内で実行)、セーブデータの書き込み |
+| SHIORI | SHIORI/3.0 (GET / NOTIFY)、SHIORI/2.x (読み替え)、DLL 製 SHIORI を WebAssembly にしたもの (下記)、JavaScript 製 SHIORI (Web Worker 内で実行)、セーブデータの書き込み |
 | シェル | `surfaces.txt` / `surfaces*.txt` (新旧書式、MATERIA 式の見出し、`surface.append`、範囲指定、数字と名前のエイリアス)、element 合成 (element0 が無ければ surfaceN.png の上に重ねる)、`.pna` / `use_self_alpha` (1・true・full) / 左上色の透過、collision / collisionex |
 | SERIKO | sometimes / rarely / random / periodic / always / runonce / talk / yen-e / never / bind、overlay・overlay-fast・base・replace・interpolate・reduce・asis・move・start・stop・alternativestart など、`-1` / `-2`、`option,exclusive` (ID 指定可) / `background` |
 | 着せ替え | `bindgroup` (メニューと `\![bind]`) |
@@ -52,8 +52,33 @@ Internet Explorer には対応していません。
 
 ### SHIORI について
 
-ブラウザでは Windows の DLL を実行できないため、YAYA・里々などの DLL 製 SHIORI は動きません。
-その場合はシェルの表示とメニューだけが使え、起動時にその旨をバルーンで知らせます。
+ブラウザでは Windows の DLL をそのまま実行できないので、各 SHIORI のソースを WebAssembly にしたものを `index.html` に組み込んでいます。
+ゴーストの `descript.txt` の `shiori` と、ゴーストが同梱している DLL の中身から、どれで動かすかを決めます (`shiori.dll` などに名前を変えてあっても分かります)。
+
+| SHIORI | DLL | ソース |
+|---|---|---|
+| YAYA | yaya.dll | [YAYA-shiori/yaya-shiori](https://github.com/YAYA-shiori/yaya-shiori) |
+| 文 (AYA5) | aya5.dll | [ponapalt/aya5-shiori](https://github.com/ponapalt/aya5-shiori) |
+| 里々 | satori.dll | [ukatech/satoriya-shiori](https://github.com/ukatech/satoriya-shiori) |
+| 華和梨 8 | shiori.dll (kawarirc.kis) | [kawari/kawari](https://github.com/kawari/kawari) |
+| 華和梨 7 | shiori.dll (kawari.ini)。SHIORI/2.x で話す | [kawari/kawari7](https://github.com/kawari/kawari7) |
+| なし栞 | nashi.dll | [yanashi-interface/nashi-shiori-studio](https://github.com/yanashi-interface/nashi-shiori-studio) |
+| minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) |
+| kagari (Lua 5.4。kotori を含む) | kagari.dll | [Tatakinov/kagari_shiori](https://github.com/Tatakinov/kagari_shiori) |
+| quickshiori (QuickJS) | quickshiori.dll | [cronfox/quickshiori](https://github.com/cronfox/quickshiori) |
+
+できないこと:
+
+- **SAORI・プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
+- **.NET (dnproxy)・PowerShell (powershiori) の SHIORI** は、ブラウザで動く実行環境が無いので動きません。
+- minato が内部でパニックした場合、その SHIORI はそこで止まります (Safari 12 で動かすため、Rust の例外処理を使わずに組んでいます)。
+
+上のどれにも当たらない SHIORI のゴーストは、シェルの表示とメニューだけが使え、起動時にその旨をバルーンで知らせます。
+SHIORI のセーブデータは、ゴーストを閉じたとき・ページを閉じたり隠したりしたときに保存します。
+
+組み込んでいる SHIORI とライブラリのライセンスは、メニューの「ライセンス」で見られます。
+
+#### JavaScript で SHIORI を書く
 
 JavaScript で SHIORI を書く場合は、`ghost/master/descript.txt` に `shiori,shiori.js` と書き、
 次の関数を export する ES モジュールを置きます。
@@ -97,7 +122,8 @@ engawa.raise('OnBoot');
 src/
   vfs/       ファイルツリー、zip 展開、IndexedDB への保存
   package/   descript.txt の解析、インストール
-  shiori/    SHIORI/3.0 プロトコル、JS SHIORI (Web Worker)
+  shiori/    SHIORI/3.0 プロトコル、SHIORI/2.x の読み替え、JS SHIORI と WebAssembly の SHIORI (Web Worker)
+  assets/shiori/  WebAssembly にした SHIORI (native/build.mjs が作る) とそのライセンス
   shell/     surfaces.txt の解析、サーフェス合成、SERIKO、キャラクター表示
   balloon/   バルーンのスキンと表示
   sakura/    さくらスクリプトの字句解析と再生
@@ -105,6 +131,7 @@ src/
   ui/        メニュー (シェルの menu.* に対応)、ダイアログ、ヘルプ
 sample/      サンプルゴーストのテキスト (画像は tools/ で生成)
 tools/       サンプルゴーストの .nar を作るスクリプト
+native/      SHIORI を WebAssembly にするビルド (engines.mjs に各 SHIORI のソースのコミットと設定、shim/ に Windows の API などの代わり)
 ```
 
 サンプルゴーストを編集したら `npm run sample` で `src/assets/engawa.nar` を作り直します (ビルドで `index.html` に埋め込まれます)。
@@ -118,3 +145,12 @@ tools/       サンプルゴーストの .nar を作るスクリプト
 | `npm run build` | 型チェックと本番ビルド (開くだけで動く `dist/index.html` 1ファイル) |
 | `npm test` | 単体テスト |
 | `npm run sample` | サンプルゴーストの .nar を生成 |
+| `node native/build.mjs [名前...]` | SHIORI を WebAssembly にし直す (下記) |
+
+### SHIORI を WebAssembly にし直す
+
+`src/assets/shiori/` の出来上がりはリポジトリに入っているので、Engawa をビルドするだけなら次のものは要りません。
+SHIORI の版を上げるときは、`native/engines.mjs` のコミットを変えてから `node native/build.mjs` を実行します。
+
+- [Emscripten](https://emscripten.org/) 5.0.x (`~/emsdk` か環境変数 `EMSDK`)。6.0 以降は Safari 15 より古いブラウザ向けに出力できないので使えません。
+- Rust の nightly と rust-src (`rustup toolchain install nightly --component rust-src`、Rust 製の SHIORI 用)。標準ライブラリごと例外処理なしで作り直すためです。
