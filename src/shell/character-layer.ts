@@ -47,10 +47,13 @@ export class CharacterLayer {
     if (this.lastTap?.view === view) this.lastTap = undefined;
   }
 
-  /** ページかデスクトップに向いた入力か (メニュー・ダイアログ・タスクバー・バルーンの上のものは除く) */
+  /**
+   * ページかデスクトップに向いた入力か。除くもの (バルーン、メニュー・タスクバー・通知の .overlay、ダイアログと
+   * dialog-polyfill の背景) を挙げ、それ以外はすべてキャラクターに届けうる
+   * (広い画面では、本文の列の外にいるキャラクターの下は <main> や <body> になる)。
+   */
   private onDesktop(target: EventTarget | null): boolean {
-    if (!(target instanceof Element) || target.closest('.balloon')) return false;
-    return target === document.documentElement || target === document.body || target.closest('.page, .desktop') !== null;
+    return target instanceof Element && target.closest('.balloon, .overlay, dialog, .backdrop, ._dialog_overlay') === null;
   }
 
   /** その位置で一番上にある、不透明なピクセルを持つキャラクター */
