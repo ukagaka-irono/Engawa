@@ -1,12 +1,12 @@
 import { el } from './dom';
 
 /**
- * ヘルプに README を出すための小さな Markdown 表示。HTML は解釈せず、すべて文字として DOM に入れる。
+ * README をページとヘルプに出すための小さな Markdown 表示。HTML は解釈せず、すべて文字として DOM に入れる。
  * 扱うのは README で使っているものだけ: 見出し・段落・箇条書き・表・コードブロック・`コード`・**太字**・[リンク](URL)。
- * 見出しはダイアログの見出し (h2) の下に来るよう、# を h3 から始める。
+ * topLevel は # を何番目の見出しにするか (ページでは h1、ダイアログの見出し h2 の下に置くヘルプでは h3)。
  */
-export function renderMarkdown(text: string): HTMLElement {
-  const root = el('div', { className: 'help-doc' });
+export function renderMarkdown(text: string, topLevel = 3): HTMLElement {
+  const root = el('div', { className: 'doc' });
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   let i = 0;
   const isBlockStart = (line: string) => /^(#{1,6}\s|```|\|)/.test(line) || /^\s*-\s/.test(line);
@@ -21,7 +21,7 @@ export function renderMarkdown(text: string): HTMLElement {
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       const level = heading[1].length;
-      const h = el(`h${Math.min(level + 2, 6)}` as 'h3', { className: `help-h${Math.min(level, 3)}` });
+      const h = el(`h${Math.min(level + topLevel - 1, 6)}` as 'h3', { className: `doc-h${Math.min(level, 3)}` });
       h.append(...inline(heading[2]));
       root.appendChild(h);
       i++;

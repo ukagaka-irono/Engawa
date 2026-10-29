@@ -37,8 +37,11 @@
   --menu-check: 24px;
   --menu-sidebar: 24px;
 
-  --desktop-top: #4f86c6;
-  --desktop-bottom: #bcd6ee;
+  /* ページ (README を載せた文書) */
+  --page: #ffffff;
+  --page-width: 760px;
+  --rule: var(--rule);
+  --text-2xl: 24px;
 
   /* Win32 のウィンドウ */
   --window: #f0f0f0;
@@ -106,19 +109,20 @@
   box-sizing: border-box;
 }
 
-html,
+/* 如何かのデモページのように、ページ自体は README を載せた普通の文書としてスクロールする */
 body {
   margin: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-body {
   font-family: var(--font-ui);
   font-size: var(--text-md);
   color: var(--window-text);
-  background: var(--desktop-bottom);
+  background: var(--page);
   -webkit-font-smoothing: antialiased;
+}
+
+/* キャラクターの上ではキャラクターを触れることを示す (下の文書の文字カーソルより優先) */
+html.over-character,
+html.over-character * {
+  cursor: pointer !important;
 }
 
 /* 枠線や輪の太さ・間隔 (1〜2px) は余白ではないので、4px の刻みには乗せない */
@@ -143,15 +147,28 @@ body {
   border: 0;
 }
 
+/* ------------------------------------------------------------------ ページ */
+
+.page {
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding: var(--space-5) max(var(--space-4), env(safe-area-inset-right))
+    calc(var(--taskbar-height) + env(safe-area-inset-bottom) + var(--space-5)) max(var(--space-4), env(safe-area-inset-left));
+  font-size: var(--text-lg);
+  line-height: var(--leading);
+}
+
 /* ------------------------------------------------------------------ デスクトップ */
 
-/* キャラクターはタスクバーの上 (作業領域の下端) に立つ */
+/*
+ * キャラクターはタスクバーの上 (作業領域の下端) に立ち、ページの上に重なる。
+ * 層そのものは入力を通し、キャラクターの不透明な所への入力だけを character-layer.ts が受け取る。
+ */
 .desktop {
   position: fixed;
   inset: 0 0 calc(var(--taskbar-height) + env(safe-area-inset-bottom)) 0;
   overflow: hidden;
-  background: linear-gradient(to bottom, var(--desktop-top), var(--desktop-bottom));
-  touch-action: none;
+  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -167,7 +184,6 @@ body {
 .character canvas {
   display: block;
   image-rendering: auto;
-  touch-action: none;
 }
 
 .character.dragging {
@@ -182,6 +198,7 @@ body {
   left: 0;
   top: 0;
   z-index: 2;
+  pointer-events: auto;
   font-family: var(--b-font);
   font-size: var(--b-size);
   font-weight: var(--b-weight);
@@ -813,71 +830,84 @@ body {
 .help-dialog .dialog-body {
   padding-bottom: var(--space-4);
   background: var(--field);
-  border-bottom: 1px solid #d9d9d9;
+  border-bottom: 1px solid var(--rule);
   line-height: var(--leading);
   user-select: text;
 }
 
-.help-doc .help-h1 {
+/* README の文書 (ページとヘルプで共通。ページでは文字を一回り大きくする) */
+.doc .doc-h1 {
   margin: 0 0 var(--space-3);
   font-size: var(--text-xl);
 }
 
-.help-doc .help-h2 {
+.doc .doc-h2 {
   margin: var(--space-5) 0 var(--space-2);
   padding-bottom: var(--space-1);
-  border-bottom: 1px solid #d9d9d9;
+  border-bottom: 1px solid var(--rule);
   font-size: var(--text-lg);
 }
 
-.help-doc .help-h3 {
+.doc .doc-h3 {
   margin: var(--space-4) 0 var(--space-2);
   font-size: var(--text-md);
 }
 
-.help-doc p,
-.help-doc ul {
+.doc p,
+.doc ul {
   margin: 0 0 var(--space-3);
 }
 
-.help-doc ul {
+.doc ul {
   padding-left: var(--space-5);
 }
 
-.help-doc code {
+.doc code {
   padding: 0 2px;
   background: var(--window);
   font-family: var(--font-mono);
 }
 
-.help-doc pre {
+.doc pre {
   margin: 0 0 var(--space-3);
   padding: var(--space-2) var(--space-3);
   overflow-x: auto;
   background: var(--window);
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--rule);
 }
 
-.help-doc pre code {
+.doc pre code {
   padding: 0;
   background: none;
 }
 
-.help-doc table {
+.doc table {
   margin: 0 0 var(--space-3);
   border-collapse: collapse;
 }
 
-.help-doc th,
-.help-doc td {
+.doc th,
+.doc td {
   padding: var(--space-1) var(--space-2);
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--rule);
   text-align: left;
   vertical-align: top;
 }
 
-.help-doc th {
+.doc th {
   background: var(--window);
+}
+
+.page .doc-h1 {
+  font-size: var(--text-2xl);
+}
+
+.page .doc-h2 {
+  font-size: var(--text-xl);
+}
+
+.page .doc-h3 {
+  font-size: var(--text-lg);
 }
 
 /* ------------------------------------------------------------------ 通知 */
