@@ -1,3 +1,4 @@
+import type { SaoriEffect } from '../saori/context';
 import type { ShioriHooks } from './shiori';
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -10,12 +11,13 @@ export interface WorkerCall {
   type: string;
 }
 
-/** Worker からの知らせ。result は要求への答え、write はセーブデータ、log はコンソールへ */
+/** Worker からの知らせ。result は要求への答え、write はセーブデータ、log はコンソールへ、saori は SAORI に頼まれたこと */
 export type WorkerReply =
   | { id: number; type: 'result'; ok: true; value?: unknown }
   | { id: number; type: 'result'; ok: false; error: string }
   | { type: 'write'; path: string; data: Uint8Array }
-  | { type: 'log'; message: string };
+  | { type: 'log'; message: string }
+  | { type: 'saori'; effect: SaoriEffect };
 
 /**
  * Web Worker の中で動く SHIORI の共通部分 (JS 製・DLL を WebAssembly にしたもの)。
@@ -84,6 +86,10 @@ export abstract class WorkerShiori {
     }
     if (msg.type === 'log') {
       this.hooks.onLog(msg.message);
+      return;
+    }
+    if (msg.type === 'saori') {
+      this.hooks.onSaori?.(msg.effect);
       return;
     }
     const p = this.pending.get(msg.id);

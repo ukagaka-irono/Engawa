@@ -1,4 +1,5 @@
 import type { FileTree } from '../vfs/files';
+import { containsText } from '../util/bytes';
 import type { EngineId } from './native-engines';
 // 本体の wasm (gzip)。ビルドでは data: URL として index.html に埋め込まれる
 import AYA5_WASM from '../assets/shiori/aya5.wasm.gz?url';
@@ -48,15 +49,6 @@ const RULES: Rule[] = [
   { id: 'quickshiori', label: 'quickshiori', wasmUrl: QUICKSHIORI_WASM, signatures: ['__shiori_request'], dllNames: ['quickshiori.dll'], markers: ['index.js'] },
 ];
 
-function contains(data: Uint8Array, text: string): boolean {
-  const needle = new TextEncoder().encode(text);
-  const first = needle[0];
-  outer: for (let i = data.indexOf(first); i >= 0 && i <= data.length - needle.length; i = data.indexOf(first, i + 1)) {
-    for (let j = 1; j < needle.length; j++) if (data[i + j] !== needle[j]) continue outer;
-    return true;
-  }
-  return false;
-}
 
 /**
  * ゴーストの SHIORI が WebAssembly 版のどれに当たるか。
@@ -67,7 +59,7 @@ export function detectNativeEngine(dllName: string, files: FileTree): NativeEngi
   const name = dllName.toLowerCase();
   const dll = files.get(`ghost/master/${dllName}`);
   if (dll) {
-    const hit = RULES.find((r) => r.signatures.some((s) => contains(dll, s)));
+    const hit = RULES.find((r) => r.signatures.some((s) => containsText(dll, s)));
     if (hit) return hit;
   }
   return RULES.find((r) => r.dllNames.includes(name)) ?? RULES.find((r) => r.markers.some((m) => files.has(`ghost/master/${m}`)));

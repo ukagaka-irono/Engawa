@@ -1,4 +1,3 @@
-import { gunzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import createKawari from '../src/assets/shiori/kawari.mjs';
 import KAWARI_WASM from '../src/assets/shiori/kawari.wasm.gz?inline';
@@ -18,51 +17,10 @@ import createSatori from '../src/assets/shiori/satori.mjs';
 import SATORI_WASM from '../src/assets/shiori/satori.wasm.gz?inline';
 import createYaya from '../src/assets/shiori/yaya.mjs';
 import YAYA_WASM from '../src/assets/shiori/yaya.wasm.gz?inline';
-import type { EmscriptenModule, EngineFactory } from '../src/shiori/native-engines';
 import { buildRequest } from '../src/shiori/protocol';
 import { fromShiori2, toShiori2 } from '../src/shiori/shiori2';
 import { encodeCharset } from '../src/util/charset-encode';
-
-/**
- * WebAssembly にした SHIORI (native/build.mjs が作ったもの) を、Worker の代わりに Node でそのまま動かす。
- * native-worker.ts と同じく、ゴーストのファイルをメモリ上のファイルシステムに置いて load / request / unload を呼ぶ。
- */
-async function boot(create: EngineFactory, wasmDataUrl: string, files: Record<string, Uint8Array>) {
-  const wasmBinary = gunzipSync(Uint8Array.from(atob(wasmDataUrl.slice(wasmDataUrl.indexOf(',') + 1)), (c) => c.charCodeAt(0)));
-  const out: string[] = [];
-  const m: EmscriptenModule = await create({ wasmBinary, locateFile: (p) => p, print: (s) => out.push(s), printErr: (s) => out.push(s) });
-  const fs = m.FS as EmscriptenModule['FS'] & { mkdirTree(path: string): void };
-  fs.mkdirTree('/ghost/master');
-  for (const [path, data] of Object.entries(files)) {
-    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-    if (dir) fs.mkdirTree(`/ghost/master/${dir}`);
-    fs.writeFile(`/ghost/master/${path}`, data);
-  }
-  const put = (bytes: Uint8Array) => {
-    const p = m._malloc(bytes.length + 1);
-    m.HEAPU8.set(bytes, p);
-    m.HEAPU8[p + bytes.length] = 0;
-    return p;
-  };
-  const dir = new TextEncoder().encode('/ghost/master/');
-  const loaded = m._load(put(dir), dir.length);
-  const raw = (bytes: Uint8Array): Uint8Array | undefined => {
-    const lenPtr = m._malloc(4);
-    m.HEAP32[lenPtr >> 2] = bytes.length;
-    const res = m._request(put(bytes), lenPtr);
-    const value = res ? m.HEAPU8.slice(res, res + m.HEAP32[lenPtr >> 2]) : undefined;
-    if (res) m._free(res);
-    m._free(lenPtr);
-    return value;
-  };
-  /** SHIORI/3.0 の GET を送り、応答を charset で読む */
-  const get = (id: string, charset = 'Shift_JIS', refs: string[] = []) => {
-    const text = [`GET SHIORI/3.0`, `Charset: ${charset}`, 'Sender: Engawa', 'SecurityLevel: local', `ID: ${id}`, ...refs.map((r, i) => `Reference${i}: ${r}`)].join('\r\n');
-    const res = raw(encodeCharset(text + '\r\n\r\n', charset));
-    return res && new TextDecoder(charset).decode(res);
-  };
-  return { m, loaded, raw, get, out, read: (path: string) => m.FS.readFile(`/ghost/master/${path}`) };
-}
+import { boot } from './native-boot';
 
 const sjis = (text: string) => encodeCharset(text.replace(/\n/g, '\r\n'), 'Shift_JIS');
 

@@ -4,8 +4,8 @@
  *   ファイル            open/read/write (パスの \ は / にする)
  *   文字コード          CP932 (CP_ACP) と UTF-8 を、engawa_iconv.c と同じ表で変換する。wchar_t は4バイト (UTF-32)
  *   時刻                localtime_r / clock_gettime
- *   スレッド・排他      ブラウザの Worker は1本なので、何もしない (スレッドは作れない)
- *   DLL (SAORI)         読めないので失敗を返す
+ *   スレッド・排他      ブラウザの Worker は1本なので、排他は何もしない。CreateThread はその場で最後まで走らせる
+ *   DLL (SAORI)         engawa_saori.c に渡す (JavaScript・WebAssembly で作り直した SAORI だけが読める)
  */
 #ifndef ENGAWA_WINDOWS_H
 #define ENGAWA_WINDOWS_H
@@ -79,6 +79,8 @@ typedef DWORD (*LPTHREAD_START_ROUTINE)(void *);
 #define CP_ACP 0
 #define CP_OEMCP 1
 #define CP_UTF8 65001
+#define MB_ERR_INVALID_CHARS 0x08
+#define WC_ERR_INVALID_CHARS 0x80
 #define DLL_PROCESS_DETACH 0
 #define DLL_PROCESS_ATTACH 1
 #define DLL_THREAD_ATTACH 2
@@ -119,6 +121,17 @@ typedef struct {
 
 typedef enum { GetFileExInfoStandard } GET_FILEEX_INFO_LEVELS;
 
+/* CSaori の SAORI が使うもの (窓・版の情報)。窓は無いので、メッセージボックスは何も出さずに OK を返す */
+typedef void *HWND;
+typedef CRITICAL_SECTION *LPCRITICAL_SECTION;
+#define MB_OK 0
+#define IDOK 1
+typedef struct {
+  DWORD dwOSVersionInfoSize, dwMajorVersion, dwMinorVersion, dwBuildNumber, dwPlatformId;
+  WCHAR szCSDVersion[128];
+} OSVERSIONINFOW, OSVERSIONINFO;
+#define ZeroMemory(p, n) memset((p), 0, (n))
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -155,6 +168,11 @@ HANDLE CreateThread(void *security, SIZE_T stack, LPTHREAD_START_ROUTINE start, 
 DWORD WaitForSingleObject(HANDLE h, DWORD ms);
 
 HMODULE LoadLibraryW(LPCWSTR name);
+HMODULE LoadLibraryA(LPCSTR name);
+HMODULE GetModuleHandleA(LPCSTR name);
+int MessageBoxW(HWND owner, LPCWSTR text, LPCWSTR caption, UINT type);
+BOOL GetVersionExW(OSVERSIONINFOW *info);
+#define GetVersionEx GetVersionExW
 FARPROC GetProcAddress(HMODULE module, LPCSTR name);
 BOOL FreeLibrary(HMODULE module);
 void FreeLibraryAndExitThread(HMODULE module, DWORD code);

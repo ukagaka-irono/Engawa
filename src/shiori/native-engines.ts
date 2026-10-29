@@ -2,6 +2,7 @@
  * WebAssembly にした SHIORI の読み込み口 (Worker 側)。native/build.mjs が src/assets/shiori/ に作る。
  * 本体の wasm は大きいので、ここではなくメインスレッド (native-detect.ts) が data: URL で持ち、load のときに渡す。
  */
+import type { SaoriBridge } from '../saori/host';
 import createAya5 from '../assets/shiori/aya5.mjs';
 import createKagari from '../assets/shiori/kagari.mjs';
 import createKawari from '../assets/shiori/kawari.mjs';
@@ -17,10 +18,11 @@ export type EngineId = 'yaya' | 'aya5' | 'satori' | 'kawari' | 'kawari7' | 'nash
 /** Emscripten のメモリ上のファイルシステム (使うものだけ) */
 export interface EmscriptenFS {
   mkdir(path: string): void;
-  writeFile(path: string, data: Uint8Array): void;
+  /** canOwn なら data を写さずにそのまま使う */
+  writeFile(path: string, data: Uint8Array, opts?: { canOwn?: boolean }): void;
   readFile(path: string): Uint8Array;
   readdir(path: string): string[];
-  stat(path: string): { mode: number };
+  stat(path: string): { mode: number; mtime: Date | number };
   isDir(mode: number): boolean;
   isFile(mode: number): boolean;
   analyzePath(path: string): { exists: boolean };
@@ -37,6 +39,8 @@ export interface EmscriptenModule {
   _load(ptr: number, len: number): number;
   _request(ptr: number, lenPtr: number): number;
   _unload(): number;
+  /** SAORI の置き場 (native/shim/engawa_saori.c が呼ぶ。src/saori/host.ts) */
+  engawaSaori?: SaoriBridge;
 }
 
 export interface EngineOptions {

@@ -4,11 +4,17 @@
  * やり取りはバイト列のまま (文字コードは NativeShiori が扱う)。書き換えられたファイルは flush / unload で知らせる。
  */
 import { gunzipSync } from 'fflate';
+import type { SaoriEffect, SaoriEnv } from '../saori/context';
+import { SaoriHost } from '../saori/host';
+import { saoriResolver } from '../saori/registry';
+import { prepareWasmSaori, type WasmSaoriPlan } from '../saori/wasm';
+import { callLoad, callRequest, walk, writeFiles } from './native-call';
 import { ENGINES, type EmscriptenModule, type EngineId } from './native-engines';
 
 type ToNative =
-  | { id: number; type: 'load'; engine: EngineId; wasm: Uint8Array; files: [string, Uint8Array][] }
+  | { id: number; type: 'load'; engine: EngineId; wasm: Uint8Array; files: [string, Uint8Array][]; env: SaoriEnv; saori: WasmSaoriPlan[] }
   | { id: number; type: 'request'; data: Uint8Array }
+  | { id: number; type: 'env'; env: SaoriEnv }
   | { id: number; type: 'flush' }
   | { id: number; type: 'unload' };
 
@@ -21,29 +27,18 @@ const ctx = self as unknown as {
 const ROOT = '/ghost/master';
 
 let mod: EmscriptenModule | undefined;
+let saori: SaoriHost | undefined;
+/** SAORI が読むブラウザの様子 (メインスレッドが送ってくる) */
+let env: SaoriEnv;
 /** 読み込んだときの中身。flush で比べて、変わったファイルだけ書き戻す */
 const original = new Map<string, Uint8Array>();
 
 const log = (message: string) => ctx.postMessage({ type: 'log', message });
 
-function mkdirs(fs: EmscriptenModule['FS'], dir: string): void {
-  let path = '';
-  for (const part of dir.split('/').filter(Boolean)) {
-    path += '/' + part;
-    if (!fs.analyzePath(path).exists) fs.mkdir(path);
-  }
-}
-
-/** ROOT 以下のファイルを (ROOT からの相対パス, 中身) で列挙する */
-function* walk(fs: EmscriptenModule['FS'], dir: string, rel = ''): Generator<[string, Uint8Array]> {
-  for (const name of fs.readdir(dir)) {
-    if (name === '.' || name === '..') continue;
-    const path = `${dir}/${name}`;
-    const relPath = rel ? `${rel}/${name}` : name;
-    const st = fs.stat(path);
-    if (fs.isDir(st.mode)) yield* walk(fs, path, relPath);
-    else if (fs.isFile(st.mode)) yield [relPath, fs.readFile(path)];
-  }
+/** SAORI がメインスレッドに頼むこと (クリップボード・音など)。答えは待たない */
+function post(effect: SaoriEffect): void {
+  const data = 'data' in effect ? effect.data : undefined;
+  ctx.postMessage({ type: 'saori', effect }, data ? [data.buffer] : []);
 }
 
 function same(a: Uint8Array, b: Uint8Array): boolean {
@@ -55,20 +50,13 @@ function same(a: Uint8Array, b: Uint8Array): boolean {
 /** SHIORI が書いたファイル (セーブデータなど) をメインスレッドへ送る */
 function flush(): void {
   if (!mod) return;
-  for (const [path, data] of walk(mod.FS, ROOT)) {
+  for (const [path, abs] of walk(mod.FS, ROOT)) {
+    const data = mod.FS.readFile(abs);
     const before = original.get(path);
     if (before && same(before, data)) continue;
     original.set(path, data);
     ctx.postMessage({ type: 'write', path, data });
   }
-}
-
-/** バイト列を SHIORI のメモリに置く (DLL の GlobalAlloc に当たる。解放は SHIORI 側の GlobalFree = free) */
-function put(m: EmscriptenModule, data: Uint8Array): number {
-  const ptr = m._malloc(data.length + 1);
-  m.HEAPU8.set(data, ptr);
-  m.HEAPU8[ptr + data.length] = 0;
-  return ptr;
 }
 
 async function load(msg: Extract<ToNative, { type: 'load' }>): Promise<void> {
@@ -80,35 +68,23 @@ async function load(msg: Extract<ToNative, { type: 'load' }>): Promise<void> {
     print: (s: string) => log(s),
     printErr: (s: string) => log(s),
   });
-  mkdirs(m.FS, ROOT);
-  for (const [path, data] of msg.files) {
-    const slash = path.lastIndexOf('/');
-    if (slash >= 0) mkdirs(m.FS, `${ROOT}/${path.slice(0, slash)}`);
-    m.FS.writeFile(`${ROOT}/${path}`, data);
-    original.set(path, data);
-  }
+  writeFiles(m.FS, ROOT, msg.files);
+  for (const [path, data] of msg.files) original.set(path, data);
   m.FS.chdir(ROOT);
   mod = m;
+  env = msg.env;
+  // SHIORI が SAORI の DLL を開くと、native/shim/engawa_saori.c がここを呼ぶ
+  const prepared = await prepareWasmSaori(msg.saori, msg.files, { fs: m.FS, root: ROOT, post, log });
+  saori = new SaoriHost(m.FS, ROOT, saoriResolver({ fs: m.FS, env: () => env, post, log, prepared }), log);
+  m.engawaSaori = saori.bridge;
   // DLL と同じく、ディレクトリは末尾に区切りを付けて渡す
   const dir = new TextEncoder().encode(`${ROOT}/`);
-  if (!m._load(put(m, dir), dir.length)) log('SHIORI load() returned FALSE');
+  if (!callLoad(m, dir)) log('SHIORI load() returned FALSE');
 }
 
 function request(data: Uint8Array): Uint8Array {
-  const m = mod;
-  if (!m) throw new Error('SHIORI is not loaded');
-  const lenPtr = m._malloc(4);
-  try {
-    m.HEAP32[lenPtr >> 2] = data.length;
-    const res = m._request(put(m, data), lenPtr);
-    if (!res) return new Uint8Array(0);
-    const len = m.HEAP32[lenPtr >> 2];
-    const out = m.HEAPU8.slice(res, res + len);
-    m._free(res);
-    return out;
-  } finally {
-    m._free(lenPtr);
-  }
+  if (!mod) throw new Error('SHIORI is not loaded');
+  return callRequest(mod, data);
 }
 
 ctx.onmessage = async (e) => {
@@ -122,13 +98,19 @@ ctx.onmessage = async (e) => {
       case 'request':
         value = request(msg.data);
         break;
+      case 'env':
+        env = msg.env;
+        break;
       case 'flush':
         flush();
         break;
       case 'unload':
         mod?._unload();
+        // SHIORI が閉じ忘れた SAORI も unload する
+        saori?.unloadAll();
         flush();
         mod = undefined;
+        saori = undefined;
         break;
     }
     ctx.postMessage({ id: msg.id, type: 'result', ok: true, value }, value ? [value.buffer] : []);

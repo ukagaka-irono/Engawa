@@ -1,6 +1,7 @@
 import { BalloonView } from '../balloon/balloon-view';
 import type { BalloonSkin } from '../balloon/skin';
 import { Descript } from '../package/descript';
+import type { SaoriEffect } from '../saori/context';
 import { ScriptPlayer, type InlineImageOptions, type PlayerHost, type PlayResult } from '../sakura/player';
 import { buildRequest, parseResponse, type Reference, type ShioriMethod } from '../shiori/protocol';
 import { createShiori, type Shiori } from '../shiori/shiori';
@@ -9,6 +10,7 @@ import type { CharacterLayer } from '../shell/character-layer';
 import { CharacterView, type CharacterMouseEvent } from '../shell/character-view';
 import { SurfaceRenderer } from '../shell/renderer';
 import { Shell } from '../shell/shell';
+import { copyText } from '../util/clipboard';
 import { loadTransparentImage } from '../util/image';
 import { joinPath, normalizePath, type FileTree } from '../vfs/files';
 import { writePackageFile, type PackageMeta } from '../vfs/storage';
@@ -209,11 +211,9 @@ export class Ghost implements PlayerHost {
     if (this.destroyed) return;
 
     let shiori = createShiori(this.files, this.descript, {
-      onWrite: (path, data) => {
-        this.files.set(path, data);
-        void writePackageFile(this.key, normalizePath(path), data).catch((e) => console.warn('[save]', e));
-      },
+      onWrite: (path, data) => this.saveFile(path, data),
       onLog: (m) => console.info(`[${this.name}]`, m),
+      onSaori: (effect) => this.onSaori(effect),
     });
     try {
       await shiori.load();
@@ -1100,13 +1100,44 @@ export class Ghost implements PlayerHost {
     return url;
   }
 
+  /** SHIORI (や SAORI) が書いたファイルを、表示に使う写しとセーブデータの両方に入れる */
+  private saveFile(path: string, data: Uint8Array): void {
+    this.files.set(path, data);
+    // 書き換えられた画像などは、作ってあった URL を作り直す
+    const url = this.blobUrls.get(path);
+    if (url) {
+      URL.revokeObjectURL(url);
+      this.blobUrls.delete(path);
+    }
+    void writePackageFile(this.key, normalizePath(path), data).catch((e) => console.warn('[save]', e));
+  }
+
+  /** SAORI に頼まれたこと (Worker からは触れないもの) */
+  private onSaori(effect: SaoriEffect): void {
+    if (effect.kind === 'clipboard') {
+      void copyText(effect.text);
+    } else if (effect.kind === 'sound') {
+      const data = effect.data ?? this.files.get(effect.path);
+      if (data) this.playAudio(URL.createObjectURL(new Blob([data as BlobPart])), false, true);
+    } else if (effect.kind === 'write') {
+      this.saveFile(effect.path, effect.data);
+    }
+  }
+
   playSound(file: string, loop = false): void {
     const url = this.blobUrl(file);
-    if (!url) return;
+    if (url) this.playAudio(url, loop, false);
+  }
+
+  /** revoke なら、鳴り終わったら URL を捨てる (その場で作った URL) */
+  private playAudio(url: string, loop: boolean, revoke: boolean): void {
     const audio = new Audio(url);
     audio.loop = loop;
     this.sounds.push(audio);
-    const forget = () => (this.sounds = this.sounds.filter((s) => s !== audio));
+    const forget = () => {
+      this.sounds = this.sounds.filter((s) => s !== audio);
+      if (revoke) URL.revokeObjectURL(url);
+    };
     audio.addEventListener('ended', forget);
     audio.addEventListener('error', forget);
     void audio.play().catch(forget);

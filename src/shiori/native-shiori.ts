@@ -1,3 +1,5 @@
+import { readSaoriEnv } from '../saori/context';
+import { planWasmSaori } from '../saori/wasm-assets';
 import { encodeCharset } from '../util/charset-encode';
 import { decodeText, normalizeCharset } from '../util/text';
 import type { FileTree } from '../vfs/files';
@@ -20,6 +22,10 @@ export class NativeShiori extends WorkerShiori implements Shiori {
   private readonly flushOnHide = () => {
     if (document.visibilityState === 'hidden') void this.call({ type: 'flush' }, REQUEST_TIMEOUT_MS).catch(() => {});
   };
+  /** SAORI (画面の大きさを答えるものなど) が読む様子を、窓の大きさが変わったら送り直す */
+  private readonly sendEnv = () => {
+    void this.call({ type: 'env', env: readSaoriEnv() } as never, REQUEST_TIMEOUT_MS).catch(() => {});
+  };
 
   constructor(
     private readonly files: FileTree,
@@ -34,9 +40,12 @@ export class NativeShiori extends WorkerShiori implements Shiori {
     // 埋め込みの wasm (gzip) は data: URL。file:// でも fetch で読める
     const wasm = new Uint8Array(await (await fetch(this.engine.wasmUrl)).arrayBuffer());
     const files = [...this.files.sub('ghost/master').entries()];
-    await this.start(new NativeWorker(), { type: 'load', engine: this.engine.id, wasm, files } as never, [wasm.buffer]);
+    // WebAssembly にした SAORI は、SHIORI が開く前に Worker の中で作っておく。里々は ssu.dll を自分の中のもので呼ぶ
+    const saori = await planWasmSaori(this.files, this.name, this.engine.id === 'satori' ? ['ssu'] : []);
+    await this.start(new NativeWorker(), { type: 'load', engine: this.engine.id, wasm, files, env: readSaoriEnv(), saori } as never, [wasm.buffer]);
     document.addEventListener('visibilitychange', this.flushOnHide);
     window.addEventListener('pagehide', this.flushOnHide);
+    window.addEventListener('resize', this.sendEnv);
   }
 
   async request(text: string): Promise<string> {
@@ -62,6 +71,7 @@ export class NativeShiori extends WorkerShiori implements Shiori {
   unload(): Promise<void> {
     document.removeEventListener('visibilitychange', this.flushOnHide);
     window.removeEventListener('pagehide', this.flushOnHide);
+    window.removeEventListener('resize', this.sendEnv);
     return this.stop({ type: 'unload' });
   }
 }

@@ -4,16 +4,19 @@
 //     luachild                 dir() でディレクトリを列挙する (子プロセスは作れない)
 //     lua-utf8                 Lua 5.4 の utf8 に、kotori が使う next() を足したもの
 //     iconv                    new(to, from):iconv(str)。CP932 は engawa_iconv.c で変換する
-//     fh, saori_universal.native, ukagaka_misc.windows   SAORI などは使えないので、呼ばれたら失敗を返す
+//     saori_universal.native   SAORI の DLL を engawa_saori.c で開く
+//     fh, ukagaka_misc.windows, conv.windows   使えないので、呼ばれたら失敗を返す
 #include <dirent.h>
 #include <sys/stat.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "engawa_iconv.h"
+#include "engawa_saori.h"
 #include "lua.hpp"
 
 extern "C" {
@@ -146,6 +149,97 @@ int open_iconv(lua_State *L) {
   return 1;
 }
 
+// ---------------------------------------------------------------- saori_universal.native
+
+// kotori の saori_universal が使う。Native(path) が SAORI の DLL を開き、:load(dir) / :request(str) / :unload() で呼ぶ。
+// DLL は engawa_saori.c が開く (JavaScript・WebAssembly で作り直した SAORI だけが使える)
+const char *SAORI_META = "engawa.saori";
+
+struct Saori {
+  void *handle;
+  int (*load)(char *, long);
+  char *(*request)(char *, long *);
+  int (*unload)();
+};
+
+char *dup_bytes(const char *s, size_t len) {
+  char *p = static_cast<char *>(malloc(len + 1));
+  memcpy(p, s, len);
+  p[len] = 0;
+  return p;
+}
+
+int saori_load(lua_State *L) {
+  Saori *s = static_cast<Saori *>(luaL_checkudata(L, 1, SAORI_META));
+  size_t len;
+  const char *dir = luaL_checklstring(L, 2, &len);
+  lua_pushboolean(L, s->load && s->load(dup_bytes(dir, len), (long)len));
+  return 1;
+}
+
+int saori_request(lua_State *L) {
+  Saori *s = static_cast<Saori *>(luaL_checkudata(L, 1, SAORI_META));
+  size_t len;
+  const char *req = luaL_checklstring(L, 2, &len);
+  long n = (long)len;
+  char *res = s->request ? s->request(dup_bytes(req, len), &n) : nullptr;
+  if (!res) {
+    lua_pushnil(L);
+    return 1;
+  }
+  lua_pushlstring(L, res, n > 0 ? (size_t)n : 0);
+  free(res);
+  return 1;
+}
+
+int saori_unload(lua_State *L) {
+  Saori *s = static_cast<Saori *>(luaL_checkudata(L, 1, SAORI_META));
+  bool ok = s->unload && s->unload();
+  if (s->handle) dlclose(s->handle);
+  *s = Saori{};
+  lua_pushboolean(L, ok);
+  return 1;
+}
+
+int saori_gc(lua_State *L) {
+  Saori *s = static_cast<Saori *>(luaL_checkudata(L, 1, SAORI_META));
+  if (s->handle) dlclose(s->handle);
+  *s = Saori{};
+  return 0;
+}
+
+int saori_new(lua_State *L) {
+  const char *path = luaL_checkstring(L, 1);
+  Saori *s = static_cast<Saori *>(lua_newuserdatauv(L, sizeof(Saori), 0));
+  *s = Saori{};
+  luaL_setmetatable(L, SAORI_META);
+  s->handle = dlopen(path, RTLD_LAZY);
+  if (s->handle) {
+    s->load = reinterpret_cast<int (*)(char *, long)>(dlsym(s->handle, "load"));
+    s->request = reinterpret_cast<char *(*)(char *, long *)>(dlsym(s->handle, "request"));
+    s->unload = reinterpret_cast<int (*)()>(dlsym(s->handle, "unload"));
+  }
+  return 1;
+}
+
+int open_saori(lua_State *L) {
+  if (luaL_newmetatable(L, SAORI_META)) {
+    lua_pushcfunction(L, saori_gc);
+    lua_setfield(L, -2, "__gc");
+    lua_newtable(L);
+    lua_pushcfunction(L, saori_load);
+    lua_setfield(L, -2, "load");
+    lua_pushcfunction(L, saori_request);
+    lua_setfield(L, -2, "request");
+    lua_pushcfunction(L, saori_unload);
+    lua_setfield(L, -2, "unload");
+    lua_setfield(L, -2, "__index");
+  }
+  lua_pop(L, 1);
+  lua_pushcfunction(L, saori_new);
+  return 1;
+}
+
 // ---------------------------------------------------------------- Lua で書いたもの
 
 // lua-utf8 のうち kotori が使うもの。next(s, i) は i の次の文字の位置と符号 (i が無ければ最初の文字)。
@@ -160,7 +254,7 @@ const char *LUA_UTF8 =
     "end\n"
     "return M\n";
 
-// SAORI やファイルハンドルの拡張は使えない。どの関数を呼んでも失敗 (nil と理由) を返す
+// ファイルハンドルなどの拡張は使えない。どの関数を呼んでも失敗 (nil と理由) を返す
 const char *LUA_UNSUPPORTED =
     "return setmetatable({}, { __index = function() return function() return nil, 'not supported in Engawa (browser)' end end })\n";
 
@@ -193,7 +287,7 @@ void engawa_kagari_preload(lua_State *L) {
       {"lua-utf8", open_lua_utf8},
       {"iconv", open_iconv},
       {"fh", open_unsupported},
-      {"saori_universal.native", open_unsupported},
+      {"saori_universal.native", open_saori},
       {"ukagaka_misc.windows", open_unsupported},
       {"conv.windows", open_unsupported},
   };

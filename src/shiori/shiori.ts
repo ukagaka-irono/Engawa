@@ -1,3 +1,4 @@
+import type { SaoriEffect } from '../saori/context';
 import type { Descript } from '../package/descript';
 import type { FileTree } from '../vfs/files';
 import { JsShiori } from './js-shiori';
@@ -9,6 +10,8 @@ export interface ShioriHooks {
   /** SHIORI がファイルを書き込んだ (セーブデータ)。パスはゴーストルートからの相対。 */
   onWrite(path: string, data: Uint8Array): void;
   onLog(message: string): void;
+  /** SAORI に頼まれたこと (クリップボード・音など。src/saori/context.ts) */
+  onSaori?(effect: SaoriEffect): void;
 }
 
 /** SHIORI/3.0 の生のリクエスト文字列を受け取って生のレスポンス文字列を返すもの。 */

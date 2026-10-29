@@ -1,0 +1,23 @@
+sqlori — https://github.com/ukatech/csaori.git @ 1ddb8c9024bb4716fa3ac25d05c819fad224e459
+
+------------------------------------------------------------------------
+sqlori (readme.txt より。だれでも自由に使い、変えてよい)
+------------------------------------------------------------------------
+
+[en.US_UTF-8 (English)]
+Simple SQLite3 database SAORI - sqlori
+SQLori v1.2.13
+Author: 時原砂, Roy
+License: This SAORI is for testing and teaching, anyone can use and modify it freely.
+
+------------------------------------------------------------------------
+SQLite (Public Domain)
+------------------------------------------------------------------------
+
+** The author disclaims copyright to this source code.  In place of
+** a legal notice, here is a blessing:
+**
+**    May you do good and not evil.
+**    May you find forgiveness for yourself and forgive others.
+**    May you share freely, never taking more than you give.
+**

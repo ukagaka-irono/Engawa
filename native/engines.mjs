@@ -72,9 +72,9 @@ export const ENGINES = [
     licenses: [{ title: '華和梨 8 (修正 BSD)', file: 'LICENSE' }],
     repo: 'https://github.com/kawari/kawari.git',
     commit: '3d21bdc4c7249175388606899bad6fe9ce955d86',
-    // build/src/files.mak と gcc.mak (MACH_TYPE=js) と同じ。DLL の SAORI (SAORI_NATIVE) は使えないので外す。
-    // ソースは EUC-JP だが、ASCII でないのはコメントだけ
-    defines: ['NDEBUG'],
+    // build/src/files.mak と gcc.mak (MACH_TYPE=js) と同じ。DLL の SAORI (SAORI_NATIVE) は gcc.mak の Linux 向けと同じく入れる
+    // (dlopen は native/shim/engawa_saori.c が受ける)。ソースは EUC-JP だが、ASCII でないのはコメントだけ
+    defines: ['NDEBUG', 'ENABLE_SAORI_NATIVE'],
     includes: ['build/src'],
     cxxflags: ['-std=c++11', '-Wno-everything'],
     sources: [
@@ -82,7 +82,7 @@ export const ENGINES = [
         (n) => `build/src/libkawari/${n}.cpp`,
       ),
       ...['misc', 'mt19937ar', 'l10n', 'phttp', 'base64'].map((n) => `build/src/misc/${n}.cpp`),
-      ...['saori', 'saori_module', 'saori_unique'].map((n) => `build/src/saori/${n}.cpp`),
+      ...['saori', 'saori_module', 'saori_unique', 'saori_native'].map((n) => `build/src/saori/${n}.cpp`),
       ...['echo', 'dict', 'date', 'counter', 'file', 'escape', 'urllist', 'substitute', 'split', 'communicate', 'xargs', 'string', 'help', 'saori', 'system'].map(
         (n) => `build/src/kis/kis_${n}.cpp`,
       ),
@@ -190,6 +190,18 @@ export const ENGINES = [
             '    }\n',
         ],
       ],
+      // SAORI もスレッドで呼んで時間切れを見ていたが、スレッドを作れないのでそのまま呼ぶ (SAORI は Worker の中で同期で答える)
+      'src/saori.rs': [
+        [
+          '    let (tx, rx) = mpsc::channel();\n',
+          '    #[cfg(target_os = "emscripten")]\n' +
+            '    {\n' +
+            '        let _ = timeout;\n' +
+            '        return Some(dll.request(&args));\n' +
+            '    }\n' +
+            '    let (tx, rx) = mpsc::channel();\n',
+        ],
+      ],
     },
     ldflags: ['-sSTACK_SIZE=16MB'],
   },
@@ -250,7 +262,8 @@ export const ENGINES = [
     repo: 'https://github.com/cronfox/quickshiori.git',
     commit: '150bb24dcff08c246b179386d247a9b1e83bc129',
     // JavaScript (QuickJS-NG) の SHIORI。src/CMakeLists.txt の quickshiori.dll と、QuickJS-NG の qjs・qjs-libc を一緒に組む。
-    // Windows 専用なので windows.h の代わりを使う。Windows 専用のモジュール (ukadll・ukafmo・winrtmc) と sqlite は入れない
+    // Windows 専用なので windows.h の代わりを使う。Windows 専用のモジュール (ukafmo・winrtmc) と sqlite は入れない。
+    // SAORI などの DLL を呼ぶ ukadll は、本来は別の DLL (ukadll.dll) だが、組み込みのモジュールにする
     encoding: 'utf-8',
     win32Shim: true,
     includes: ['3rd/quickjs'],
@@ -258,9 +271,32 @@ export const ENGINES = [
     defines: ['_GNU_SOURCE', 'QUICKJS_NG_BUILD'],
     cxxflags: ['-std=c++20', '-Wno-everything'],
     cflags: ['-std=gnu11', '-Wno-everything'],
+    edits: {
+      // index.js が import する "ukadll"・"ukadll.dll" (と、ゴーストのディレクトリの DLL として探されたときの名前) を、組み込みの ukadll にする
+      'src/quickshiori.cpp': [
+        ['#include "quickshiori_module.h"\n', '#include "quickshiori_module.h"\nextern "C" JSModuleDef* engawa_ukadll_init_module(JSContext *ctx, const char *module_name);\n'],
+        ['        strcmp(module_name, "quickshiori") == 0)', '        strcmp(module_name, "quickshiori") == 0 ||\n        strcmp(module_name, "ukadll")      == 0)'],
+        [
+          '    js_init_module_quickshiori(g_ctx, "quickshiori");\n',
+          '    js_init_module_quickshiori(g_ctx, "quickshiori");\n' +
+            '    engawa_ukadll_init_module(g_ctx, "ukadll");\n' +
+            '    engawa_ukadll_init_module(g_ctx, "ukadll.dll");\n' +
+            '    engawa_ukadll_init_module(g_ctx, (g_dir + "/ukadll.dll").c_str());\n',
+        ],
+      ],
+      // DLL の入口 (js_init_module) を組み込みのモジュールの入口にする。いくつかの名前で登録するので、クラスは1度だけ作る
+      'module/ukadll/quickjs_ukadll.cpp': [
+        ['extern "C" __declspec(dllexport) JSModuleDef* js_init_module(', 'extern "C" JSModuleDef* engawa_ukadll_init_module('],
+        [
+          '    JS_NewClassID(rt, &js_ukadll_class_id);\n    JSClassDef class_def = { "UkaDll", js_ukadll_finalizer };\n    JS_NewClass(rt, js_ukadll_class_id, &class_def);\n',
+          '    if (!JS_IsRegisteredClass(rt, js_ukadll_class_id)) {\n        JS_NewClassID(rt, &js_ukadll_class_id);\n        JSClassDef class_def = { "UkaDll", js_ukadll_finalizer };\n        JS_NewClass(rt, js_ukadll_class_id, &class_def);\n    }\n',
+        ],
+      ],
+    },
     sources: [
       'src/quickshiori.cpp',
       'src/quickshiori_module.cpp',
+      'module/ukadll/quickjs_ukadll.cpp',
       ...['dtoa', 'libregexp', 'libunicode', 'quickjs', 'quickjs-libc'].map((n) => `3rd/quickjs/${n}.c`),
     ],
   },

@@ -1,9 +1,9 @@
-// DLL 製 SHIORI を WebAssembly にする。
-//   node native/build.mjs [engine...]   (何も書かなければ全部)
+// DLL 製 SHIORI と SAORI を WebAssembly にする。
+//   node native/build.mjs [名前...]   (何も書かなければ全部。SHIORI は engines.mjs、SAORI は saoris.mjs)
 // 各 SHIORI のソースを固定のコミットで native/.src/ に取ってきて、Emscripten でビルドし、
 //   src/assets/shiori/<engine>.mjs      (Emscripten が作る読み込み用の JS)
 //   src/assets/shiori/<engine>.wasm.gz  (本体。ビルドで index.html に埋め込まれる)
-// を書き出す。出来上がったものはリポジトリに入れるので、Engawa をビルドするだけなら Emscripten は要らない。
+// を書き出す (SAORI は src/assets/saori/ に)。出来上がったものはリポジトリに入れるので、Engawa をビルドするだけなら Emscripten は要らない。
 //
 // Emscripten は 5.0.x を使う (6.0 以降は Safari 14.1 / 15 より古いブラウザ向けに出力できない)。
 // 場所は環境変数 EMSDK (既定は ~/emsdk)。
@@ -14,10 +14,14 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { ENGINES } from './engines.mjs';
+import { SAORIS } from './saoris.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const nativeDir = join(root, 'native');
 const outDir = join(root, 'src', 'assets', 'shiori');
+const saoriOutDir = join(root, 'src', 'assets', 'saori');
+/** 出来上がりを置くところ。SAORI (saoris.mjs のもの) は src/assets/saori/ */
+const outDirOf = (engine) => (engine.saori ? saoriOutDir : outDir);
 
 // ---------------------------------------------------------------- Emscripten
 
@@ -70,9 +74,9 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-/** native/.src/<name> を指定のコミットにする (浅く取る。サブモジュールも) */
+/** native/.src/<name> を指定のコミットにする (浅く取る。サブモジュールも)。同じリポジトリの SAORI は source の名前で1つを使う */
 function fetchSource(engine) {
-  return fetchRepo(engine.name, engine.name, engine.repo, engine.commit);
+  return fetchRepo(engine.name, engine.source ?? engine.name, engine.repo, engine.commit);
 }
 
 /** native/.src/<dir> を repo の commit にする */
@@ -152,10 +156,39 @@ async function buildRust(engine, src, buildDir) {
   for (const [file, edits] of Object.entries(engine.edits ?? {})) {
     writeFileSync(join(crate, file), applyEdits(readFileSync(join(crate, file), 'utf-8'), edits, file));
   }
-  const patches = Object.entries(engine.rust.patch ?? {})
-    .map(([name, dir]) => `${name} = { path = ${JSON.stringify(join(nativeDir, 'shim', dir).replace(/\\/g, '/'))} }`)
-    .join('\n');
-  if (patches) writeFileSync(join(crate, 'Cargo.toml'), `${readFileSync(join(crate, 'Cargo.toml'), 'utf-8')}\n\n[patch.crates-io]\n${patches}\n`);
+  const tomlPath = (dir) => JSON.stringify(dir.replace(/\\/g, '/'));
+  const patches = Object.entries(engine.rust.patch ?? {}).map(([name, dir]) => `${name} = { path = ${tomlPath(join(nativeDir, 'shim', dir))} }`);
+  if (patches.length) writeFileSync(join(crate, 'Cargo.toml'), `${readFileSync(join(crate, 'Cargo.toml'), 'utf-8')}\n\n[patch.crates-io]\n${patches.join('\n')}\n`);
+  // 依存のクレートを直して使うもの (engines.mjs・saoris.mjs の rust.vendor: { 名前: { version, replace: [[探す, 置く]…] } })。
+  // crates.io から取ってきたものを build/ に写し、.rs のすべての「探す」を「置く」にして [patch.crates-io] で差し替える
+  const vendors = Object.entries(engine.rust.vendor ?? {});
+  if (vendors.length) {
+    execFileSync(cargo, ['+nightly', 'fetch', '--target', 'wasm32-unknown-emscripten'], { cwd: crate, env, stdio: 'ignore' });
+    const registry = join(process.env.CARGO_HOME ?? join(homedir(), '.cargo'), 'registry', 'src');
+    const lines = [];
+    for (const [name, { version, replace }] of vendors) {
+      const found = readdirSync(registry).map((d) => join(registry, d, `${name}-${version}`)).find((d) => existsSync(d));
+      if (!found) throw new Error(`${name} ${version} が cargo のレジストリにありません`);
+      const copy = join(buildDir, 'vendor', name);
+      rmSync(copy, { recursive: true, force: true });
+      cpSync(found, copy, { recursive: true });
+      const rewrite = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const path = join(dir, entry.name);
+          if (entry.isDirectory()) rewrite(path);
+          else if (entry.name.endsWith('.rs')) {
+            const text = readFileSync(path, 'utf-8');
+            const next = replace.reduce((t, [from, to]) => t.split(from).join(to), text);
+            if (next !== text) writeFileSync(path, next);
+          }
+        }
+      };
+      rewrite(copy);
+      lines.push(`${name} = { path = ${tomlPath(copy)} }`);
+    }
+    const toml = readFileSync(join(crate, 'Cargo.toml'), 'utf-8');
+    writeFileSync(join(crate, 'Cargo.toml'), patches.length ? `${toml}${lines.join('\n')}\n` : `${toml}\n\n[patch.crates-io]\n${lines.join('\n')}\n`);
+  }
   console.log(`[${engine.name}] cargo build (wasm32-unknown-emscripten)`);
   const target = join(buildDir, 'target');
   await new Promise((resolve, reject) => {
@@ -236,14 +269,17 @@ function rustLicenses(crate) {
   const out = [];
   for (const id of [...seen].sort()) {
     const pkg = packages.get(id);
-    if (id === meta.resolve.root || pkg.source === null) continue; // 本体と、native/shim の代わりのクレート
     const dir = dirname(pkg.manifest_path);
+    // 本体と、native/shim の代わりのクレートは載せない。rust.vendor で直したもの (build/…/vendor) は載せる
+    const vendored = pkg.source === null && /[\\/]vendor[\\/]/.test(dir);
+    if (id === meta.resolve.root || (pkg.source === null && !vendored)) continue;
     const files = readdirSync(dir).filter((f) => /^(licen[cs]e|copying|unlicense|notice)/i.test(f));
     // MIT を選べるものは MIT の条文だけを載せる
     const mit = /\bMIT\b/.test(pkg.license ?? '') && files.find((f) => /^licen[cs]e-mit/i.test(f));
     const chosen = mit ? [mit] : files;
     const text = chosen.length ? chosen.map((f) => readFileSync(join(dir, f), 'utf-8').replace(/\r\n?/g, '\n').trim()).join('\n\n') : `(ライセンス: ${pkg.license ?? '不明'})`;
-    out.push(section(`${pkg.name} ${pkg.version} (Rust のクレート、${pkg.license ?? 'ライセンス不明'})`, text));
+    const note = vendored ? '。Engawa で wasm32 向けの部分を外したもの' : '';
+    out.push(section(`${pkg.name} ${pkg.version} (Rust のクレート、${pkg.license ?? 'ライセンス不明'}${note})`, text));
   }
   return out;
 }
@@ -252,7 +288,7 @@ function writeLicenses(engine, locate, extra = []) {
   const parts = [`${engine.label} — ${engine.repo} @ ${engine.commit}\n`];
   for (const spec of engine.licenses ?? []) parts.push(section(spec.title, licenseText(spec, locate)));
   parts.push(...extra);
-  writeFileSync(join(outDir, `${engine.name}.LICENSES.txt`), parts.join('\n'));
+  writeFileSync(join(outDirOf(engine), `${engine.name}.LICENSES.txt`), parts.join('\n'));
 }
 
 /** すべての SHIORI に入る Emscripten の実行時ライブラリ (musl・libc++ など) と、いくつかのものが参照する Apache License 2.0 の条文 */
@@ -381,8 +417,9 @@ async function build(engine) {
     // 古いライブラリの代わり (native/shim/<名前>)。boost-compat など
     ...(engine.shimIncludes ?? []).map((d) => `-I${join(nativeDir, 'shim', d)}`),
   ];
-  // SHIORI のソースは iconv を CP932 対応のものに差し替えて読む (native/shim/engawa_iconv.h)
-  const engineFlags = [...common, '-include', 'engawa_iconv.h', ...(engine.prelude ? ['-include', engine.prelude] : [])];
+  // SHIORI のソースは iconv を CP932 対応のものに (native/shim/engawa_iconv.h)、
+  // SAORI の DLL の読み込み (dlopen など) を Engawa の SAORI に (native/shim/engawa_saori.h) 差し替えて読む
+  const engineFlags = [...common, '-include', 'engawa_iconv.h', '-include', 'engawa_saori.h', ...(engine.prelude ? ['-include', engine.prelude] : [])];
   const objects = [];
   if (engine.rust) objects.push(await buildRust(engine, src, buildDir));
   const jobs = (engine.sources ?? []).map((s) => {
@@ -397,7 +434,9 @@ async function build(engine) {
   let done = 0;
   await pool(jobs, Math.max(2, cpus().length), async ({ file, lang, encoding, obj }) => {
     const [root, rel] = locate(file);
-    const input = convertSource(root, rel, lang === 'c' ? undefined : encoding, buildDir, file.startsWith('@') ? [] : engine.edits?.[file]);
+    // ヘッダの写しを作ったもの (headerDirs) は、"…" のヘッダが写しの方から見つかるよう、ソースも写しから組む
+    const copy = headerDirs.length > 0 && !file.startsWith('@');
+    const input = convertSource(root, rel, lang === 'c' ? undefined : encoding, buildDir, file.startsWith('@') ? [] : engine.edits?.[file], copy);
     mkdirSync(dirname(obj), { recursive: true });
     const flags = lang === 'c' ? [...engineFlags, ...(engine.cflags ?? [])] : [...engineFlags, ...(engine.cxxflags ?? [])];
     // 変換した写しからも、元のファイルの隣のヘッダを "…" で読めるように
@@ -407,7 +446,7 @@ async function build(engine) {
     if (done % 10 === 0 || done === jobs.length) console.log(`[${engine.name}] ${done}/${jobs.length}`);
   });
   mkdirSync(join(buildDir, 'obj'), { recursive: true });
-  for (const extra of ['engawa_iconv.c', ...(engine.win32Shim ? ['win32.cpp'] : []), ...(engine.shims ?? [])]) {
+  for (const extra of ['engawa_iconv.c', 'engawa_saori.c', ...(engine.win32Shim ? ['win32.cpp'] : []), ...(engine.shims ?? [])]) {
     const obj = join(buildDir, 'obj', `shim-${extra.replace(/\W/g, '_')}.o`);
     await run(extra.endsWith('.c') ? 'emcc' : 'em++', [...common, '-c', join(nativeDir, 'shim', extra), '-o', obj], src);
     objects.push(obj);
@@ -429,28 +468,30 @@ async function build(engine) {
     ],
     src,
   );
-  mkdirSync(outDir, { recursive: true });
+  const out = outDirOf(engine);
+  mkdirSync(out, { recursive: true });
   const wasm = readFileSync(outJs.replace(/\.mjs$/, '.wasm'));
   const gz = gzipSync(wasm, { level: 9 });
-  writeFileSync(join(outDir, `${engine.name}.wasm.gz`), gz);
+  writeFileSync(join(out, `${engine.name}.wasm.gz`), gz);
   const header = `// ${engine.label}: ${engine.repo} @ ${engine.commit}\n// Emscripten ${version} で native/build.mjs が作ったもの。手で編集しない\n`;
   // wasm はいつも wasmBinary で渡し、locateFile も渡すので、wasm の URL は使わない。
   // Vite が new URL(…, import.meta.url) を素材として探しに行かないよう、ただの文字列にしておく
   const glue = readFileSync(outJs, 'utf-8').replace(/new URL\("([\w.-]+\.wasm)",import\.meta\.url\)\.href/g, '"$1"');
   if (/import\.meta\.url\)/.test(glue.replace(/new URL\("\.",_scriptName\)/g, ''))) console.warn(`[${engine.name}] glue に import.meta.url を使う URL が残っています`);
-  writeFileSync(join(outDir, `${engine.name}.mjs`), header + glue);
+  writeFileSync(join(out, `${engine.name}.mjs`), header + glue);
   writeFileSync(
-    join(outDir, `${engine.name}.d.mts`),
+    join(out, `${engine.name}.d.mts`),
     `// native/build.mjs が作ったもの。手で編集しない\nimport type { EngineFactory } from '../../shiori/native-engines';\ndeclare const create: EngineFactory;\nexport default create;\n`,
   );
   writeLicenses(engine, locate, engine.rust ? [section('Rust の標準ライブラリ (The Rust Project Developers、MIT OR Apache-2.0)', readFileSync(join(rustToolchain('nightly'), 'share', 'doc', 'cargo', 'LICENSE-MIT'), 'utf-8').trim()), ...rustLicenses(join(buildDir, 'crate'))] : []);
-  console.log(`[${engine.name}] ${relative(root, outDir)}/${engine.name}.wasm.gz  ${(wasm.length / 1e6).toFixed(2)} MB → ${(gz.length / 1e6).toFixed(2)} MB`);
+  console.log(`[${engine.name}] ${relative(root, out)}/${engine.name}.wasm.gz  ${(wasm.length / 1e6).toFixed(2)} MB → ${(gz.length / 1e6).toFixed(2)} MB`);
 }
 
+const ALL = [...ENGINES, ...SAORIS.map((s) => ({ ...s, saori: true }))];
 const wanted = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const targets = wanted.length ? ENGINES.filter((e) => wanted.includes(e.name)) : ENGINES;
+const targets = wanted.length ? ALL.filter((e) => wanted.includes(e.name)) : ALL;
 if (wanted.length && targets.length !== wanted.length) {
-  console.error(`知らない SHIORI: ${wanted.filter((w) => !ENGINES.some((e) => e.name === w)).join(', ')}`);
+  console.error(`知らない SHIORI・SAORI: ${wanted.filter((w) => !ALL.some((e) => e.name === w)).join(', ')}`);
   process.exit(1);
 }
 if (process.argv.includes('--clean')) rmSync(join(nativeDir, '.build'), { recursive: true, force: true });

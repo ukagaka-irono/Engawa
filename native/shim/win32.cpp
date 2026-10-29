@@ -12,6 +12,7 @@
 #include <string>
 
 #include "engawa_iconv.h"
+#include "engawa_saori.h"
 
 namespace {
 
@@ -262,21 +263,42 @@ void LeaveCriticalSection(CRITICAL_SECTION *) {}
 LONG InterlockedIncrement(LONG volatile *v) { return ++*v; }
 LONG InterlockedDecrement(LONG volatile *v) { return --*v; }
 
-HANDLE CreateThread(void *, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD) {
-  last_error = ENOSYS;
-  return NULL;
+// スレッドは作れないので、その場で最後まで走らせ、もう終わったスレッドの持ち手を返す
+// (なし栞の非同期の SAORI 呼び出しは、呼んだときに済んでいることになる)。持ち手は閉じても何もしない番号
+HANDLE CreateThread(void *, SIZE_T, LPTHREAD_START_ROUTINE start, LPVOID param, DWORD, LPDWORD id) {
+  if (id) *id = 1;
+  start(param);
+  return (HANDLE)(intptr_t)-2;
 }
 
 DWORD WaitForSingleObject(HANDLE, DWORD) { return WAIT_OBJECT_0; }
 
-HMODULE LoadLibraryW(LPCWSTR) {
-  last_error = ENOSYS;
-  return NULL;
+HMODULE LoadLibraryW(LPCWSTR name) { return (HMODULE)engawa_dlopen(path_of(name).c_str(), 0); }
+HMODULE LoadLibraryA(LPCSTR name) { return (HMODULE)engawa_dlopen(name, 0); }
+FARPROC GetProcAddress(HMODULE module, LPCSTR name) { return (FARPROC)engawa_dlsym(module, name); }
+BOOL FreeLibrary(HMODULE module) { return engawa_dlclose(module) == 0; }
+HMODULE GetModuleHandleA(LPCSTR) { return NULL; }
+
+// 窓は出せない。内容はログに出し、OK が押されたことにする
+int MessageBoxW(HWND, LPCWSTR text, LPCWSTR caption, UINT) {
+  fprintf(stderr, "[%s] %s\n", path_of(caption).c_str(), path_of(text).c_str());
+  return IDOK;
 }
 
-FARPROC GetProcAddress(HMODULE, LPCSTR) { return NULL; }
-BOOL FreeLibrary(HMODULE) { return TRUE; }
-void FreeLibraryAndExitThread(HMODULE, DWORD) { abort(); }
+// Windows 10 と答える
+BOOL GetVersionExW(OSVERSIONINFOW *info) {
+  info->dwMajorVersion = 10;
+  info->dwMinorVersion = 0;
+  info->dwBuildNumber = 19045;
+  info->dwPlatformId = 2;
+  info->szCSDVersion[0] = 0;
+  return TRUE;
+}
+
+// 走らせたスレッドの最後に呼ばれる。スレッドはその場で走らせているので、終わらせずに戻る
+void FreeLibraryAndExitThread(HMODULE module, DWORD) {
+  if (module) FreeLibrary(module);
+}
 
 DWORD GetModuleFileNameW(HMODULE, LPWSTR buf, DWORD size) {
   if (size) buf[0] = 0;

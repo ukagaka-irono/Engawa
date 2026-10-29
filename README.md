@@ -65,6 +65,7 @@ Internet Explorer には対応していません。
 |---|---|
 | パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory` と番号付きの `balloonN.directory` 同梱)、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む) |
 | SHIORI | SHIORI/3.0 (GET / NOTIFY)、SHIORI/2.x (読み替え)、DLL 製 SHIORI を WebAssembly にしたもの (下記)、JavaScript 製 SHIORI (Web Worker 内で実行)、セーブデータの書き込み |
+| SAORI | SAORI/1.0。JavaScript で作り直したものと、WebAssembly にしたもの (下記)。どの SHIORI からも呼べる |
 | シェル | `surfaces.txt` / `surfaces*.txt` (新旧書式、MATERIA 式の見出し、`surface.append`、範囲指定、数字と名前のエイリアス)、element 合成 (element0 が無ければ surfaceN.png の上に重ねる)、`.pna` / `use_self_alpha` (1・true・full) / 左上色の透過、collision / collisionex |
 | SERIKO | sometimes / rarely / random / periodic / always / runonce / talk / yen-e / never / bind、overlay・overlay-fast・base・replace・interpolate・reduce・asis・move・start・stop・alternativestart など、`-1` / `-2`、`option,exclusive` (ID 指定可) / `background` |
 | 着せ替え | `bindgroup` (メニューと `\![bind]`) |
@@ -92,14 +93,64 @@ Internet Explorer には対応していません。
 
 できないこと:
 
-- **SAORI・プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
+- **下の表に無い SAORI と、プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
 - **.NET (dnproxy)・PowerShell (powershiori) の SHIORI** は、ブラウザで動く実行環境が無いので動きません。
 - minato が内部でパニックした場合、その SHIORI はそこで止まります (Safari 12 で動かすため、Rust の例外処理を使わずに組んでいます)。
 
 上のどれにも当たらない SHIORI のゴーストは、シェルの表示とメニューだけが使え、起動時にその旨をバルーンで知らせます。
 SHIORI のセーブデータは、ゴーストを閉じたとき・ページを閉じたり隠したりしたときに保存します。
 
-組み込んでいる SHIORI とライブラリのライセンスは、メニューの「ライセンス」で見られます。
+組み込んでいる SHIORI・SAORI とライブラリのライセンスは、メニューの「ライセンス」で見られます。
+
+### SAORI について
+
+ゴーストが同梱している SAORI の DLL は、DLL の中身 (書き出し表にある DLL じしんの名前) とファイル名で見分け、
+ブラウザで作り直したものに差し替えて呼びます。SHIORI が DLL を開くところ (dlopen・LoadLibrary など) を Engawa が受けるので、
+上のどの SHIORI からも、Windows と同じ書き方で呼べます。
+
+WebAssembly にしたもの (ソースからビルドして `index.html` に組み込んでいます):
+
+| SAORI | DLL | ソース |
+|---|---|---|
+| ssu (里々に付いてくるもの) | ssu.dll | [ukatech/satoriya-shiori](https://github.com/ukatech/satoriya-shiori) |
+| timebkn (時刻・旧暦) | timebkn.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
+| XAORIC (XPath) | xaoric.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
+| sqlori (SQLite) | sqlori.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
+| MahjongUtil (麻雀) | MahjongUtil.dll | [nikolat/MahjongUtil](https://github.com/nikolat/MahjongUtil) |
+| mahjong_nodoka (麻雀) | nodoka.dll | [Tatakinov/mahjong_nodoka](https://github.com/Tatakinov/mahjong_nodoka) |
+| TexasHoldemUtil (ポーカー) | TexasHoldemUtil.dll | [Tatakinov/TexasHoldemUtil](https://github.com/Tatakinov/TexasHoldemUtil) |
+| saori_budoux (文の区切り) | budoux.dll | [Tatakinov/saori_budoux](https://github.com/Tatakinov/saori_budoux) |
+| saori-calcs (四則演算) | calcs.dll | [tukinami/saori-calcs](https://github.com/tukinami/saori-calcs) |
+| saori-japanese-gengou (和暦) | japanesegengou.dll | [tukinami/saori-japanese-gengou](https://github.com/tukinami/saori-japanese-gengou) |
+| saori-resized-png (画像の縮小) | resizedpng.dll | [tukinami/saori-resized-png](https://github.com/tukinami/saori-resized-png) |
+| saori-resized-png-mini (画像の縮小) | resizedpngmini.dll | [tukinami/saori-resized-png-mini](https://github.com/tukinami/saori-resized-png-mini) |
+| saori-pie-chart (円グラフ) | piechart.dll | [tukinami/saori-pie-chart](https://github.com/tukinami/saori-pie-chart) |
+| saori-qrcode (QR コード) | saori_qrcode.dll | [nikolat/saori-qrcode](https://github.com/nikolat/saori-qrcode) |
+| yaya-as-saori (YAYA を SAORI として使う) | yaya.dll | [YAYA-shiori/yaya-as-saori](https://github.com/YAYA-shiori/yaya-as-saori) (中身は上の YAYA) |
+
+JavaScript で作り直したもの (ブラウザでできることで答えます):
+
+| SAORI | DLL | ブラウザでの動き |
+|---|---|---|
+| textcopy2・clipcopy | textcopy2.dll・clipcopy.dll | クリップボードに写す (ページの操作の直後でないと、ブラウザに断られることがあります) |
+| PlayWavSound | PlayWavSound.dll | ゴーストの WAV などを鳴らす (`system:` の Windows の音は鳴らしません) |
+| ccpuid | ccpuid.dll・saori_cpuid.dll | 論理プロセッサの数・おおよそのメモリ・OS だけを答え、ほかは `<unknown>` など |
+| advanced_sysinfo | advanced_sysinfo.dll | 特別なフォルダ・ドライブは無いと答える |
+| window_info | window_info.dll | Engawa のページだけを1つの窓として答える |
+| GetDesktopInfo | GetDesktopInfo.dll | デスクトップのアイコンは無し、ごみ箱は空と答える |
+| bignum | bignum.dll | 任意の桁の計算 ([decimal.js](https://github.com/MikeMcl/decimal.js)) |
+| totp_saori | totp_saori.dll | ワンタイムパスワード (TOTP) |
+| KeywordReg | KeywordReg.dll | `keyword.txt` のキーワードを探す。漢字の読みは分からない (IME が無い) ので、カタカナとひらがなをそろえるだけ |
+
+SAORI について、できないこと・違うこと:
+
+- SAORI は SHIORI と同じ Worker の中で、同期で答えます。ブラウザに聞かないと分からないこと (クリップボード・音) は、答えを待たずにページに頼みます。
+- SAORI が書いたファイル (sqlori のデータベース、作った画像など) は、すぐに表示に使え、セーブデータと同じく保存されます。
+- SAORI どうしはファイルを分け合わないので、ある SAORI が作った画像を、別の SAORI が続けて読むことはできません。
+- saori-pie-chart は字体が無いので、円グラフの文字 (ラベル) を描きません。
+- saori-resized-png は、AVIF と OpenEXR の画像を読めません (C のライブラリやスレッドを使うため)。
+- saori-japanese-gengou の「今日」は、世界時 (UTC) の日付になります。
+- WebAssembly の SAORI を組み込んだので、`index.html` と `engawa-embed.js` はそれぞれ約 11.5 MB です (SAORI の分が約 5.6 MB)。
 
 #### JavaScript で SHIORI を書く
 
@@ -147,6 +198,8 @@ src/
   package/   descript.txt の解析、インストール
   shiori/    SHIORI/3.0 プロトコル、SHIORI/2.x の読み替え、JS SHIORI と WebAssembly の SHIORI (Web Worker)
   assets/shiori/  WebAssembly にした SHIORI (native/build.mjs が作る) とそのライセンス
+  saori/     SAORI の置き場 (SHIORI の Worker の中)、SAORI/1.0、JavaScript で作り直した SAORI
+  assets/saori/   WebAssembly にした SAORI (native/build.mjs が作る) とそのライセンス
   shell/     surfaces.txt の解析、サーフェス合成、SERIKO、キャラクター表示
   balloon/   バルーンのスキンと表示
   sakura/    さくらスクリプトの字句解析と再生
@@ -155,7 +208,7 @@ src/
   embed.ts   よそのページに埋め込む版の入口 (Ikagaka.demo と同じ関数を出す。ビルドは vite.embed.config.ts)
 sample/      サンプルゴーストのテキスト (画像は tools/ で生成)
 tools/       サンプルゴーストの .nar を作るスクリプト
-native/      SHIORI を WebAssembly にするビルド (engines.mjs に各 SHIORI のソースのコミットと設定、shim/ に Windows の API などの代わり)
+native/      SHIORI・SAORI を WebAssembly にするビルド (engines.mjs・saoris.mjs にソースのコミットと設定、shim/ に Windows の API などの代わり)
 ```
 
 サンプルゴーストを編集したら `npm run sample` で `src/assets/engawa.nar` を作り直します (ビルドで `index.html` に埋め込まれます)。
@@ -169,12 +222,12 @@ native/      SHIORI を WebAssembly にするビルド (engines.mjs に各 SHIOR
 | `npm run build` | 型チェックと本番ビルド (開くだけで動く `dist/index.html` 1ファイルと、埋め込み用の `dist/engawa-embed.js`) |
 | `npm test` | 単体テスト |
 | `npm run sample` | サンプルゴーストの .nar を生成 |
-| `node native/build.mjs [名前...]` | SHIORI を WebAssembly にし直す (下記) |
+| `node native/build.mjs [名前...]` | SHIORI・SAORI を WebAssembly にし直す (下記) |
 
-### SHIORI を WebAssembly にし直す
+### SHIORI・SAORI を WebAssembly にし直す
 
-`src/assets/shiori/` の出来上がりはリポジトリに入っているので、Engawa をビルドするだけなら次のものは要りません。
-SHIORI の版を上げるときは、`native/engines.mjs` のコミットを変えてから `node native/build.mjs` を実行します。
+`src/assets/shiori/`・`src/assets/saori/` の出来上がりはリポジトリに入っているので、Engawa をビルドするだけなら次のものは要りません。
+版を上げるときは、`native/engines.mjs` (SHIORI)・`native/saoris.mjs` (SAORI) のコミットを変えてから `node native/build.mjs` を実行します。
 
 - [Emscripten](https://emscripten.org/) 5.0.x (`~/emsdk` か環境変数 `EMSDK`)。6.0 以降は Safari 15 より古いブラウザ向けに出力できないので使えません。
-- Rust の nightly と rust-src (`rustup toolchain install nightly --component rust-src`、Rust 製の SHIORI 用)。標準ライブラリごと例外処理なしで作り直すためです。
+- Rust の nightly と rust-src (`rustup toolchain install nightly --component rust-src`、Rust 製の SHIORI・SAORI 用)。標準ライブラリごと例外処理なしで作り直すためです。
