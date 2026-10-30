@@ -3,7 +3,9 @@ import { Descript } from '../package/descript';
 import { acceptNamesOf, InstallError, installFiles, type InstallResult, type InstallTarget } from '../package/installer';
 import { CharacterLayer } from '../shell/character-layer';
 import { Shell } from '../shell/shell';
-import { InputBox, packageKindLabel, showHelp, showInfo, showLicenses, showOptions, showPackages, Toasts } from '../ui/dialogs';
+import { confirmDialog, InputBox, packageKindLabel, showHelp, showInfo, showLicenses, showOptions, showPackages, showText, Toasts } from '../ui/dialogs';
+import { hasReadme, openTool, type ToolHost } from '../ui/tools';
+import { networkUpdate } from '../package/update';
 import { licenseText } from '../ui/licenses';
 import { el } from '../ui/dom';
 import { menuSkin } from '../ui/menu-skin';
@@ -18,6 +20,7 @@ import {
   patchPackageMeta,
   readPackageFile,
   readPackageFiles,
+  writePackageFile,
   type PackageMeta,
 } from '../vfs/storage';
 import {
@@ -31,13 +34,27 @@ import {
   type InputKind,
   type InputRequest,
   type InputResult,
+  type ToolName,
 } from './ghost';
-import { saveSettings, saveSettingsNow, settings } from './settings';
+import type { LogEntry } from './properties';
+import { addHistory, saveSettings, saveSettingsNow, settings } from './settings';
+import { handleSstp, type SstpHost } from './sstp';
 
 // ビルドでは data: URL として index.html に埋め込まれる (file:// で開いても読めるように)
 import SAMPLE_URL from '../assets/engawa.nar?url';
 import README from '../../README.md?raw';
 const ARCHIVE = /\.(nar|zip)$/i;
+/** ログの種類ごとに残す数 */
+const LOG_LIMIT = 200;
+const COOKIE_KEY = 'engawa.sstp-cookies';
+
+function loadCookies(): Record<string, Record<string, string>> {
+  try {
+    return JSON.parse(localStorage.getItem(COOKIE_KEY) ?? '{}') as Record<string, Record<string, string>>;
+  } catch {
+    return {};
+  }
+}
 
 /** 入力ボックス1つ分の持ち主と種類 */
 interface InputSlot {
@@ -50,8 +67,8 @@ interface InputSlot {
 function matchesInput(slot: InputSlot, ghost: Ghost, filter?: InputFilter): boolean {
   if (slot.owner !== ghost) return false;
   if (!filter) return true;
-  if (filter.kind === 'communicatebox') return slot.kind === 'communicatebox';
-  return slot.kind === 'inputbox' && (!filter.id || filter.id === '__SYSTEM_ALL_INPUT__' || slot.id === filter.id);
+  if (filter.kind === 'communicatebox' || filter.kind === 'teachbox') return slot.kind === filter.kind;
+  return slot.kind === filter.kind && (!filter.id || filter.id === '__SYSTEM_ALL_INPUT__' || slot.id === filter.id);
 }
 
 /** ベースウェア本体。ゴーストの起動・切り替え、メニュー、インストールを受け持つ。 */
@@ -77,6 +94,15 @@ export class GhostManager implements GhostEnv {
   private readonly tray: HTMLButtonElement;
   /** 起動処理中のパッケージ (同じゴーストを二重に起動しないように) */
   private readonly booting = new Set<string>();
+  /** スクリプト・エラー・リクエストのログ (開発用パレット・developer.log) */
+  private readonly logStore = new Map<string, LogEntry[]>();
+  /** \![wait,syncobject] の名前付き同期オブジェクト */
+  private readonly syncObjects = new Map<string, { signaled: boolean; waiters: Set<() => void> }>();
+  /** \![set,tasktrayicon] (ゴーストごと) */
+  private readonly trayIcons = new Map<Ghost, { url?: string; text: string }>();
+  /** 最後にインストールしたものの名前 (lastinstalled・%lastobjectname) */
+  private readonly lastInstalledNames: Partial<Record<string, string>> = {};
+  private readonly sstpCookies = loadCookies();
 
   /**
    * embedded: よそのページに埋め込んで使う (ななろだのおためし起動など。src/embed.ts)。
@@ -161,20 +187,48 @@ export class GhostManager implements GhostEnv {
   }
 
   changeGhost(from: Ghost, target: string, raiseEvent: boolean): void {
-    const meta = this.findGhost(target);
+    const meta = this.resolveGhost(from, target);
     if (meta) void this.switchGhost(from, meta, raiseEvent);
   }
 
-  callGhost(from: Ghost, target: string): void {
-    const meta = this.findGhost(target);
-    if (meta) void this.boot(meta, { kind: 'called', from: from.identity });
+  callGhost(from: Ghost, target: string, raiseEvent = false): void {
+    const meta = this.resolveGhost(from, target);
+    if (!meta) return;
+    void (async () => {
+      if (raiseEvent) await from.raise('OnGhostCalling', [meta.sakuraName ?? meta.name, 'manual', meta.name, meta.key], { wait: true });
+      await this.boot(meta, { kind: 'called', from: from.identity });
+    })();
+  }
+
+  /** 名前のほか random・sequential (一覧で次のもの)・lastinstalled。起動中のものは選ばない */
+  private resolveGhost(from: Ghost | undefined, target: string): PackageMeta | undefined {
+    const ghosts = this.packages.filter((p) => p.kind === 'ghost');
+    const t = target.trim().toLowerCase();
+    if (t === 'random') {
+      const c = ghosts.filter((p) => !this.isActive(p.key));
+      return c[Math.floor(Math.random() * c.length)];
+    }
+    if (t === 'sequential') {
+      const i = ghosts.findIndex((p) => p.key === from?.key);
+      for (let k = 1; k <= ghosts.length; k++) {
+        const p = ghosts[(i + k) % ghosts.length];
+        if (!this.isActive(p.key)) return p;
+      }
+      return undefined;
+    }
+    if (t === 'lastinstalled') return this.findGhost(this.lastInstalledNames.ghost ?? '');
+    return this.findGhost(target);
   }
 
   focus(ghost: Ghost): void {
+    if (this.current === ghost) return;
     this.current = ghost;
+    this.updateTray();
   }
 
   closed(ghost: Ghost): void {
+    this.trayIcons.delete(ghost);
+    for (const [name, obj] of this.syncObjects) if (!obj.waiters.size && !obj.signaled) this.syncObjects.delete(name);
     const i = this.ghosts.indexOf(ghost);
     if (i >= 0) this.ghosts.splice(i, 1);
     if (this.current === ghost) this.current = this.ghosts[0];
@@ -220,6 +274,244 @@ export class GhostManager implements GhostEnv {
       t.wake();
     }
     if (this.openInput && matchesInput(this.openInput, ghost, filter)) this.inputBox.close();
+  }
+
+  async sync(name: string, op: 'set' | 'reset' | 'wait', timeout = 0): Promise<void> {
+    let obj = this.syncObjects.get(name);
+    if (!obj) {
+      obj = { signaled: false, waiters: new Set() };
+      this.syncObjects.set(name, obj);
+    }
+    if (op === 'set') {
+      obj.signaled = true;
+      for (const w of [...obj.waiters]) w();
+      return;
+    }
+    if (op === 'reset') {
+      obj.signaled = false;
+      return;
+    }
+    if (obj.signaled) return;
+    const o = obj;
+    await new Promise<void>((resolve) => {
+      let timer: number | undefined;
+      const done = () => {
+        clearTimeout(timer);
+        o.waiters.delete(done);
+        resolve();
+      };
+      o.waiters.add(done);
+      if (timeout > 0) timer = window.setTimeout(done, timeout);
+    });
+  }
+
+  openTool(ghost: Ghost, tool: ToolName, args: string[]): void {
+    openTool(this.toolHost(), ghost, tool, args);
+  }
+
+  private toolHost(): ToolHost {
+    return {
+      installed: () => this.packages,
+      logs: (kind) => this.logs(kind),
+      openOptions: () => this.openOptions(),
+      openHelp: () => showHelp(README),
+      openPackages: () => this.openPackages(),
+      toast: (m) => this.toast(m),
+    };
+  }
+
+  notify(ghost: Ghost, title: string, text: string, kind: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.toasts.show(text, { title: title || ghost.name, error: kind === 'error', duration: 15_000, onClick: () => resolve(true), onClose: () => resolve(false) });
+    });
+  }
+
+  setTrayIcon(ghost: Ghost, url: string | undefined, text: string): void {
+    if (url || text) this.trayIcons.set(ghost, { url, text });
+    else this.trayIcons.delete(ghost);
+    this.updateTray();
+  }
+
+  /** トレイのボタンに、選択中のゴーストのアイコンと文字を出す */
+  private updateTray(): void {
+    const icon = this.current ? this.trayIcons.get(this.current) : undefined;
+    let img = this.tray.querySelector<HTMLImageElement>('.tray-ghost-icon');
+    if (icon?.url) {
+      if (!img) {
+        img = el('img', { className: 'tray-ghost-icon', alt: '' });
+        this.tray.prepend(img);
+      }
+      img.src = icon.url;
+    } else img?.remove();
+    this.tray.title = icon?.text || (this.current ? `${BASEWARE_NAME}/${this.current.name}` : BASEWARE_NAME);
+  }
+
+  /**
+   * 消滅 (アンインストール)。query ならまず OnVanishSelecting を再生して確かめる (取り消したら OnVanishCancel)。
+   * 消えたゴーストの代わりに別のゴーストを起動し、そのゴーストに OnVanished、ほかには OnOtherGhostVanished を送る
+   */
+  async vanish(ghost: Ghost, opts: { next?: string; query?: boolean }): Promise<void> {
+    if (ghost.leaving) return;
+    if (opts.query) {
+      await ghost.vanishQuery('selecting');
+      const ok = await confirmDialog({
+        title: `「${ghost.name}」を消滅させますか？`,
+        message: 'このゴーストをアンインストールします。セーブデータも一緒に消え、元に戻せません。',
+        confirmLabel: '消滅',
+        danger: true,
+      });
+      if (!ok) {
+        await ghost.vanishQuery('cancel');
+        return;
+      }
+    }
+    const who = ghost.identity;
+    const meta = ghost.meta;
+    const shellName = ghost.shell.name;
+    const script = await ghost.vanishOut();
+    try {
+      await deletePackage(meta.key);
+    } catch (e) {
+      this.toasts.show(`「${meta.name}」を削除できませんでした: ${(e as Error).message}`, { error: true });
+    }
+    delete settings.ghosts[meta.key];
+    settings.running = settings.running.filter((k) => k !== meta.key);
+    saveSettings();
+    await this.refreshPackages(true);
+    const refs = [who.sakuraName, script, who.name, '', '', '', '', shellName];
+    for (const g of this.ghosts) if (g.alive && !g.leaving) void g.raise('OnOtherGhostVanished', refs);
+    const next = (opts.next ? this.findGhost(opts.next) : undefined) ?? this.resolveGhost(undefined, 'random');
+    if (next && !this.isActive(next.key)) await this.boot(next, { kind: 'vanished', from: who, script });
+    this.updateEmptyState();
+  }
+
+  /**
+   * ネットワーク更新。ghost はゴースト全体、shell は今のシェル、balloon は今のバルーン。
+   * 取り直したものがあれば読み直す
+   */
+  async update(ghost: Ghost, opts: { targets: string[]; reason: string; checkOnly?: boolean }): Promise<void> {
+    for (const raw of opts.targets) {
+      const t = raw.trim().toLowerCase();
+      let homeurl: string;
+      let files: FileTree;
+      let key = ghost.key;
+      let prefix = '';
+      if (t === 'ghost') {
+        homeurl = ghost.descript.str('homeurl');
+        files = ghost.files;
+      } else if (t === 'shell') {
+        prefix = `shell/${ghost.shell.dir}/`;
+        homeurl = ghost.shell.descript.str('homeurl') || ghost.descript.str('homeurl');
+        files = ghost.files.sub(prefix.slice(0, -1));
+      } else if (t === 'balloon' && ghost.skin.key) {
+        key = ghost.skin.key;
+        homeurl = ghost.skin.descript.str('homeurl');
+        files = await readPackageFiles(key);
+      } else continue;
+      if (!homeurl) {
+        this.toasts.show(`「${ghost.name}」の ${t} には更新の取得先 (homeurl) がありません`);
+        continue;
+      }
+      const res = await networkUpdate(
+        homeurl,
+        files,
+        {
+          raise: (id, refs) => ghost.raise(id, refs, { wait: true }),
+          write: (path, data) => writePackageFile(key, prefix + path, data),
+        },
+        { target: t, reason: opts.reason, checkOnly: opts.checkOnly, ghostName: ghost.name, path: ghost.key },
+      );
+      if (!res.ok && res.reason === 'fetch') {
+        this.toasts.show(`更新を取得できませんでした: ${homeurl} がブラウザからの取得を許していない (CORS) か、つながりません`, { error: true });
+      }
+      if (res.ok && res.changed.length && !opts.checkOnly) {
+        if (t === 'balloon') {
+          this.balloons.delete(key);
+          await ghost.changeBalloon(key, { force: true });
+        } else {
+          await this.restart(ghost, true);
+          return;
+        }
+      }
+    }
+  }
+
+  async reload(ghost: Ghost, what: string): Promise<void> {
+    const w = what.toLowerCase();
+    if (w === 'balloon') {
+      if (ghost.skin.key) this.balloons.delete(ghost.skin.key);
+      await ghost.changeBalloon(ghost.skin.key, { force: true });
+      return;
+    }
+    if (w === 'ghost' || w === 'shiori' || w === 'shell' || w === 'surface' || w.startsWith('descript')) await this.restart(ghost, true);
+  }
+
+  /** URL (http/https) かゴーストの中のファイルからインストールする */
+  async installFrom(ghost: Ghost, url: string): Promise<void> {
+    if (/^https?:/i.test(url)) {
+      let data: Uint8Array;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = new Uint8Array(await res.arrayBuffer());
+      } catch (e) {
+        const reason = (e as Error).message === 'Failed to fetch' ? 'CORS かネットワークのため取得できません' : (e as Error).message;
+        void ghost.raise('OnURLDropFailure', ['', reason, url, 0]);
+        this.toasts.show(`「${url}」を取得できませんでした: ${reason}`, { error: true });
+        return;
+      }
+      const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'download.nar');
+      await ghost.raise('OnURLDropped', [name, url, 0], { wait: true });
+      await this.install(() => filesFromZip(data), name);
+      return;
+    }
+    const path = url.replace(/^file:\/\/\/?/i, '');
+    const data = ghost.files.get(path) ?? ghost.files.get(`ghost/master/${path}`);
+    if (data) await this.install(() => filesFromZip(data), path.split('/').pop() ?? path);
+    else this.toasts.show(`「${url}」が見つかりません`, { error: true });
+  }
+
+  lastInstalled(kind: 'ghost' | 'balloon' | 'shell'): string | undefined {
+    return this.lastInstalledNames[kind];
+  }
+
+  log(ghost: Ghost, kind: 'request' | 'error' | 'script', text: string): void {
+    const list = this.logStore.get(kind) ?? [];
+    list.push({ type: kind === 'script' ? 'Ghost' : kind === 'error' ? 'Error' : 'Info', name: ghost.name, value: text, time: new Date() });
+    if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
+    this.logStore.set(kind, list);
+  }
+
+  logs(kind: string): LogEntry[] {
+    return this.logStore.get(kind) ?? [];
+  }
+
+  toast(message: string): void {
+    this.toasts.show(message);
+  }
+
+  /** SSTP を受ける相手 */
+  private sstpHost(): SstpHost {
+    return {
+      ghosts: () => this.ghosts,
+      current: () => this.current,
+      installed: () => this.packages,
+      refused: () => !settings.acceptSstp,
+      cookies: this.sstpCookies,
+      saveCookies: () => {
+        try {
+          localStorage.setItem(COOKIE_KEY, JSON.stringify(this.sstpCookies));
+        } catch {
+          // 保存できなくてもこのページの間は使える
+        }
+      },
+      version: BASEWARE_VERSION,
+    };
+  }
+
+  /** SSTP の要求を処理する (local は同じページから) */
+  sstp(request: string, local = true): Promise<string> {
+    return handleSstp(request, this.sstpHost(), local);
   }
 
   // ---------------------------------------------------------------- 起動
@@ -282,6 +574,7 @@ export class GhostManager implements GhostEnv {
       ghost = new Ghost(this, meta, files);
       this.ghosts.push(ghost);
       this.current = ghost;
+      addHistory('ghost', meta.key);
       settings.running = this.ghosts.map((g) => g.key);
       saveSettings();
       await ghost.start(mode);
@@ -418,6 +711,8 @@ export class GhostManager implements GhostEnv {
     }
     await this.refreshPackages();
     for (const k of [result.key, ...result.balloons.map((b) => b.key)]) this.balloons.delete(k);
+    this.lastInstalledNames[result.type] = result.name;
+    for (const b of result.balloons) this.lastInstalledNames.balloon = b.name;
     this.updateEmptyState();
 
     const completeRefs = [result.type, result.installName, result.balloons[0]?.name ?? ''];
@@ -451,6 +746,9 @@ export class GhostManager implements GhostEnv {
       // 起動中のゴーストはファイルの読み直しが必要
       actions.push({ label: '再起動', run: () => void this.restart(target) });
     }
+    // 中に readme.txt があれば読めるようにする
+    const readme = result.type === 'ghost' || result.type === 'balloon' ? await readPackageFile(result.key, 'readme.txt').catch(() => undefined) : undefined;
+    if (readme) actions.push({ label: 'readme', run: () => showText(`${result.name} - readme`, decodeText(readme)) });
     const where = this.packages.find((p) => p.key === result.key)?.name;
     const message = result.rerouted
       ? `${packageKindLabel(result.type)}「${result.name}」を「${where ?? result.accept}」にインストールしました`
@@ -471,7 +769,8 @@ export class GhostManager implements GhostEnv {
     this.balloons.clear();
   }
 
-  private async restart(ghost: Ghost): Promise<void> {
+  /** reload なら、起動のあいさつをせずに読み直す (\![reload,ghost]・ネットワーク更新) */
+  private async restart(ghost: Ghost, reload = false): Promise<void> {
     // 通知が古い (そのゴーストはもう閉じた・切り替わった・再起動した) ときは何もしない
     if (ghost.leaving) return;
     const meta = ghost.meta;
@@ -479,13 +778,13 @@ export class GhostManager implements GhostEnv {
     const shellName = ghost.shell.name;
     try {
       // 再起動はほかのゴーストから見て終了ではないので知らせない
-      await ghost.destroy({ silent: true });
+      await ghost.destroy({ silent: true, reload });
     } catch (e) {
       this.toasts.show(`「${meta.name}」を再起動できませんでした: ${(e as Error).message}`, { error: true });
       return;
     }
     await this.refreshPackages();
-    const booted = await this.boot(this.packages.find((p) => p.key === meta.key) ?? meta, { kind: 'boot' });
+    const booted = await this.boot(this.packages.find((p) => p.key === meta.key) ?? meta, reload ? { kind: 'reload' } : { kind: 'boot' });
     // 起動し直せなかったら、結果として終了したことになるので知らせる
     if (!booted) this.announceClosed(who, ghost.lastScript, shellName);
   }
@@ -516,12 +815,53 @@ export class GhostManager implements GhostEnv {
   }
 
   /** ドロップされたもののうち、フォルダと .nar / .zip だけをインストールする (画像などは無視) */
-  private async onDrop(dt: DataTransfer): Promise<void> {
-    const items = [...dt.items].filter((i) => i.kind === 'file');
+  /** その位置にいるゴーストとスコープ (デスクトップ座標) */
+  private ghostAt(x: number, y: number): { ghost: Ghost; scope: number } | undefined {
+    const box = this.desktop.getBoundingClientRect();
+    const px = x - box.left;
+    const py = y - box.top;
+    for (const ghost of [...this.ghosts].reverse()) {
+      if (!ghost.alive || ghost.leaving) continue;
+      for (const scope of [0, 1, 2, 3]) {
+        const r = ghost.scopeRect(scope);
+        if (r && px >= r.left && px < r.left + r.width && py >= r.top && py < r.top + r.height) return { ghost, scope };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * ドロップ。キャラクターの上に落とした .nar / .zip とフォルダ以外のファイルはそのゴーストへ (OnFileDrop2 など)、
+   * URL は OnURLQuery を経てインストール、文字は OnTextDrop
+   */
+  private async onDrop(dt: DataTransfer, x: number, y: number): Promise<void> {
+    const at = this.ghostAt(x, y);
+    const fileItems = [...dt.items].filter((i) => i.kind === 'file');
     // DataTransfer の中身はイベントの間しか読めないので、先に取り出しておく
-    const entries = items.map((i) => i.webkitGetAsEntry?.() ?? null);
-    const files = items.map((i) => i.getAsFile());
-    for (let i = 0; i < items.length; i++) {
+    const entries = fileItems.map((i) => i.webkitGetAsEntry?.() ?? null);
+    const dropped = fileItems.map((i) => i.getAsFile());
+    const url = dt.getData('text/uri-list').split(/\r?\n/).find((l) => l && !l.startsWith('#'));
+    const text = dt.getData('text/plain');
+    if (!fileItems.length) {
+      if (!at) return;
+      if (url && /^https?:/i.test(url)) await at.ghost.dropUrl(at.scope, url);
+      else if (text) await at.ghost.dropText(at.scope, text);
+      return;
+    }
+    if (at) {
+      const plain = dropped.filter((f): f is File => !!f && !ARCHIVE.test(f.name));
+      const dirs = entries.some((e) => e?.isDirectory);
+      if (plain.length && plain.length === fileItems.length && !dirs) {
+        const files = await Promise.all(plain.map(async (f) => ({ name: f.name, type: f.type, data: new Uint8Array(await f.arrayBuffer()) })));
+        if (await at.ghost.dropFiles(at.scope, files)) return;
+      }
+    }
+    return this.installDropped(entries, dropped);
+  }
+
+  /** ドロップされたもののうち、フォルダと .nar / .zip だけをインストールする (画像などは無視) */
+  private async installDropped(entries: (FileSystemEntry | null)[], files: (File | null)[]): Promise<void> {
+    for (let i = 0; i < files.length; i++) {
       const entry = entries[i];
       const file = files[i];
       if (entry?.isDirectory) await this.install(() => filesFromDirectoryEntry(entry as FileSystemDirectoryEntry), entry.name);
@@ -544,12 +884,19 @@ export class GhostManager implements GhostEnv {
     const items: MenuItem[] = [];
     const g = target?.alive ? target : undefined;
 
-    if (g) {
-      const [recommend, portal] = await Promise.all([g.sites('sakura.recommendsites'), g.sites('sakura.portalsites')]);
-      const siteItems = (sites: typeof recommend): MenuItem[] =>
-        sites.map((s) => (s.title === '-' ? { separator: true } : { label: s.title, action: () => g.openUrl(s.url) }));
-      if (portal.length) items.push({ label: 'ポータル', key: 'P', submenu: siteItems(portal) });
-      if (recommend.length) items.push({ label: 'おすすめ', key: 'R', submenu: siteItems(recommend) });
+    if (g?.isMinimized) {
+      // 最小化しているときは戻すことだけ (ほかの操作は戻してから)
+      items.push({ label: `「${g.name}」を元に戻す`, key: 'R', action: () => g.restore('user') }, { separator: true });
+    } else if (g) {
+      const [recommend, portal, keroRecommend] = await Promise.all([g.sites('sakura.recommendsites'), g.sites('sakura.portalsites'), g.sites('kero.recommendsites')]);
+      // メニューの名前・表示は SHIORI のリソースで変えられる (&X はショートカット)
+      const caption = async (id: string, fallback: string): Promise<string> => (await g.resource(id))?.replace(/\(?&(.)\)?/, '') || fallback;
+      const visible = async (id: string): Promise<boolean> => (await g.resource(id)) !== '0';
+      const siteItems = (sites: typeof recommend, kind: 'recommend' | 'portal', scope: number): MenuItem[] =>
+        sites.map((s, i) => (s.title === '-' ? { separator: true } : { label: s.title, action: () => void g.chooseSite(s, kind, scope, i) }));
+      if (portal.length) items.push({ label: await caption('sakura.portalbuttoncaption', 'ポータル'), key: 'P', submenu: siteItems(portal, 'portal', 0) });
+      if (recommend.length) items.push({ label: await caption('sakura.recommendbuttoncaption', 'おすすめ'), key: 'R', submenu: siteItems(recommend, 'recommend', 0) });
+      if (keroRecommend.length) items.push({ label: await caption('kero.recommendbuttoncaption', `${g.keroName || '相方'}のおすすめ`), key: 'K', submenu: siteItems(keroRecommend, 'recommend', 1) });
       if (items.length) items.push({ separator: true });
 
       items.push({
@@ -579,7 +926,8 @@ export class GhostManager implements GhostEnv {
       items.push({
         label: 'シェル',
         key: 'S',
-        submenu: g.shellDirs.map(
+        // \![set,property,currentghost.shelllist(…).menu,hidden] で隠したシェルは出さない (今のシェルは出す)
+        submenu: g.shellDirs.filter((d, i) => d === g.shell.dir || g.property(`currentghost.shelllist.index(${i}).menu`) !== 'hidden').map(
           (d): MenuItem => ({
             label: Shell.fromGhost(g.files, d).name,
             check: 'radio',
@@ -608,7 +956,41 @@ export class GhostManager implements GhostEnv {
           ),
         ],
       });
-      items.push({ separator: true }, { label: '話しかける…', key: 'T', action: () => void g.communicate() });
+      items.push({ separator: true }, { label: '話しかける…', key: 'T', action: () => void g.communicate() }, { label: '教える…', key: 'E', action: () => void g.teach() });
+      const history = (settings.history?.ghost ?? []).map((k) => this.packages.find((p) => p.key === k)).filter((p): p is PackageMeta => !!p && p.key !== g.key);
+      if (history.length) {
+        items.push({
+          label: '最近使ったゴースト',
+          key: 'Y',
+          submenu: history.map((p): MenuItem => ({ label: p.name, disabled: this.isActive(p.key), action: () => void this.switchGhost(g, p) })),
+        });
+      }
+      items.push({ separator: true });
+      items.push({
+        label: 'ユーティリティ',
+        key: 'U',
+        submenu: [
+          { label: '位置のリセット', key: 'P', action: () => void g.requestResetPositions() },
+          { label: 'バルーン位置のリセット', key: 'B', action: () => g.resetBalloonPositions() },
+          { label: '最小化', key: 'M', disabled: g.passive, action: () => g.minimize('user') },
+          { separator: true },
+          { label: '使用率…', key: 'U', action: () => this.openTool(g, 'rateofusegraph', []) },
+          { label: 'AI グラフ…', key: 'A', action: () => this.openTool(g, 'aigraph', []) },
+          { separator: true },
+          { label: '開発用パレット…', key: 'D', action: () => this.openTool(g, 'developer', []) },
+          { label: 'サーフェステスト…', key: 'S', action: () => this.openTool(g, 'surfacetest', []) },
+          { label: 'スクリプトログ…', key: 'L', action: () => this.openTool(g, 'backlogviewer', []) },
+          { label: 'エラーログ…', key: 'E', action: () => this.openTool(g, 'errorlog', []) },
+          { label: 'SHIORI リクエスト…', key: 'R', action: () => this.openTool(g, 'shiorirequest', []) },
+        ],
+      });
+      if (g.descript.str('homeurl')) {
+        items.push({ label: await caption('updatebuttoncaption', 'ネットワーク更新'), key: 'N', action: () => void this.update(g, { targets: ['ghost'], reason: 'manual' }) });
+      }
+      if (hasReadme(g) && (await visible('readmebutton.visible'))) items.push({ label: await caption('readmebuttoncaption', 'Readme…'), key: 'M', action: () => this.openTool(g, 'readme', []) });
+      if (!g.passive && (await visible('vanishbuttonvisible'))) {
+        items.push({ label: await caption('vanishbuttoncaption', '消滅指示…'), key: 'V', action: () => void this.vanish(g, { query: true }) });
+      }
     } else {
       items.push({
         label: 'ゴーストを起動',
@@ -634,23 +1016,23 @@ export class GhostManager implements GhostEnv {
     items.push({ label: 'ライセンス…', key: 'L', action: () => showLicenses(licenseText()) });
     items.push({ label: '情報…', key: 'A', action: () => this.openInfo(g) });
     if (g || this.ghosts.length > 1) items.push({ separator: true });
-    if (g) items.push({ label: `「${g.name}」を閉じる`, key: 'X', action: () => void this.closeGhost(g) });
+    if (g) items.push({ label: `「${g.name}」を閉じる`, key: 'X', disabled: g.passive, action: () => void this.closeGhost(g) });
     if (this.ghosts.length > 1) items.push({ label: 'すべて閉じる', key: 'Q', action: () => void this.closeAll() });
     return items;
   }
 
-  private async closeGhost(ghost: Ghost): Promise<void> {
+  private async closeGhost(ghost: Ghost, all = false): Promise<void> {
     try {
-      await ghost.close();
+      await ghost.close('user', all);
     } catch (e) {
       this.toasts.show(`「${ghost.name}」を閉じられませんでした: ${(e as Error).message}`, { error: true });
     }
   }
 
   /** すべて閉じる。次回はいま起動しているゴーストを全部起動する */
-  async closeAll(): Promise<void> {
+  async closeAll(_reason = 'user'): Promise<void> {
     const keep = this.ghosts.map((g) => g.key);
-    await Promise.all(this.ghosts.slice().map((g) => this.closeGhost(g)));
+    await Promise.all(this.ghosts.slice().map((g) => this.closeGhost(g, true)));
     settings.running = keep;
     saveSettings();
     this.updateEmptyState();
@@ -663,12 +1045,21 @@ export class GhostManager implements GhostEnv {
         balloonTimeout: settings.balloonTimeout,
         choiceTimeout: settings.choiceTimeout,
         scale: settings.scale,
+        balloonScale: settings.balloonScale,
         userName: settings.userName,
+        speech: settings.speech,
+        acceptSstp: settings.acceptSstp,
       },
       {
         save: (m) => {
+          const shell = m.scale !== settings.scale ? { before: settings.scale, after: m.scale } : undefined;
+          const balloon = m.balloonScale !== settings.balloonScale ? { before: settings.balloonScale, after: m.balloonScale } : undefined;
+          const user = m.userName !== settings.userName;
           Object.assign(settings, m);
-          for (const g of this.ghosts) g.relayout();
+          for (const g of this.ghosts) {
+            g.scalingChanged(shell, balloon);
+            if (user) void g.notify('OnNotifyUserInfo', [m.userName, m.userName, '', 'undef']);
+          }
           if (!saveSettingsNow()) {
             this.toasts.show('設定を保存できませんでした: このブラウザの保存領域が使えません (このページを開いている間だけ有効です)', { error: true });
           }
@@ -782,12 +1173,23 @@ export class GhostManager implements GhostEnv {
     // 埋め込みでは、よそのページへのドロップを横取りしない
     if (!this.options.embedded) this.bindDrop();
 
-    // 開発・連携用の簡易 API (SSTP の代わり)
+    // 開発・連携用の API。sstp は SSTP の要求文をそのまま受けて応答文を返す
     (window as unknown as { engawa: unknown }).engawa = {
       send: (script: string) => this.current?.playScript(script),
       raise: (id: string, ...refs: string[]) => this.current?.raise(id, refs),
       ghosts: () => this.ghosts.map((g) => g.name),
+      sstp: (request: string) => this.sstp(request, true),
     };
+    // よそのページ・フレームからの SSTP: postMessage({ type: 'sstp', request, id }) に { type: 'sstp-response', id, response } で答える
+    window.addEventListener('message', (e: MessageEvent) => {
+      const d = e.data as { type?: unknown; request?: unknown; id?: unknown } | null;
+      if (!d || d.type !== 'sstp' || typeof d.request !== 'string') return;
+      const local = e.origin === location.origin && e.source === window;
+      void this.sstp(d.request, local).then((response) => {
+        const target = e.source as Window | null;
+        target?.postMessage({ type: 'sstp-response', id: d.id, response }, { targetOrigin: e.origin && e.origin !== 'null' ? e.origin : '*' });
+      });
+    });
   }
 
   private bindDrop(): void {
@@ -807,7 +1209,7 @@ export class GhostManager implements GhostEnv {
       e.preventDefault();
       depth = 0;
       dropHint.hidden = true;
-      if (e.dataTransfer) void this.onDrop(e.dataTransfer);
+      if (e.dataTransfer) void this.onDrop(e.dataTransfer, e.clientX, e.clientY);
     });
   }
 }

@@ -100,17 +100,34 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   });
 }
 
+/** 入力ボックスの種類 (\![open,inputbox] / passwordinput / textareabox / dateinput / timeinput / sliderinput / ipinput) */
+export type InputType = 'text' | 'password' | 'textarea' | 'date' | 'time' | 'slider' | 'ip';
+
 export interface InputOptions {
   title: string;
+  type?: InputType;
   defaultText?: string;
-  password?: boolean;
+  /** 日付・時刻・IP の初期値 (年,月,日 / 時,分,秒 / 4つの数)、スライダーの値 */
+  values?: number[];
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  /** 文字数の上限 (--limit) */
+  limit?: number;
   /** ms。0 以下で無期限 */
   timeout?: number;
+  /** 閉じるボタンを出さない (--option=noclose) */
+  noClose?: boolean;
 }
 
 export type InputBoxResult = { value: string } | { cancelled: 'close' | 'timeout' };
 
-/** ゴーストへの入力ボックス (communicatebox / inputbox)。閉じたか時間切れかを返す。 */
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * ゴーストへの入力ボックス。閉じたか時間切れかを返す。
+ * 値は SSP と同じ形: 日付は「年,月,日」、時刻は「時,分,秒」、IP は「a.b.c.d」、複数行は改行をバイト値1に
+ */
 export class InputBox {
   private current?: { finish(v: InputBoxResult): void };
 
@@ -120,38 +137,111 @@ export class InputBox {
     return new Promise((resolve) => {
       const { root, body, actions, titleId } = dialog('input-dialog', opts.title, 'form');
       const form = root.querySelector('form')!;
-      const input = el('input', {
-        className: 'text-input',
-        type: opts.password ? 'password' : 'text',
-        value: opts.defaultText ?? '',
-        autocomplete: 'off',
-      });
-      input.setAttribute('aria-labelledby', titleId);
-      body.appendChild(input);
+      const type = opts.type ?? 'text';
+      const now = new Date();
+      const v = opts.values ?? [];
+      let read: () => string;
+      let first: HTMLElement;
+      if (type === 'textarea') {
+        const area = el('textarea', { className: 'text-input text-area', rows: 6 });
+        area.value = opts.defaultText ?? '';
+        if (opts.placeholder) area.placeholder = opts.placeholder;
+        if (opts.limit) area.maxLength = opts.limit;
+        area.setAttribute('aria-labelledby', titleId);
+        // Ctrl+Enter で決定 (Enter は改行)
+        area.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            form.requestSubmit?.() ?? form.dispatchEvent(new Event('submit', { cancelable: true }));
+          }
+        });
+        body.appendChild(area);
+        read = () => area.value.replace(/\r\n|\r|\n/g, '\x01');
+        first = area;
+      } else if (type === 'date') {
+        const input = el('input', { className: 'text-input', type: 'date' });
+        const [y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate()] = v;
+        input.value = `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
+        input.setAttribute('aria-labelledby', titleId);
+        body.appendChild(input);
+        read = () => input.value.split('-').map(Number).join(',');
+        first = input;
+      } else if (type === 'time') {
+        const input = el('input', { className: 'text-input', type: 'time', step: '1' });
+        const [h = now.getHours(), mi = now.getMinutes(), se = now.getSeconds()] = v;
+        input.value = `${pad2(h)}:${pad2(mi)}:${pad2(se)}`;
+        input.setAttribute('aria-labelledby', titleId);
+        body.appendChild(input);
+        read = () => {
+          const [hh = 0, mm = 0, ss = 0] = input.value.split(':').map(Number);
+          return [hh, mm, ss].join(',');
+        };
+        first = input;
+      } else if (type === 'slider') {
+        const min = opts.min ?? 0;
+        const max = opts.max ?? 100;
+        const range = el('input', { className: 'slider-input', type: 'range', min: String(min), max: String(max), value: String(v[0] ?? min) });
+        const out = el('output', { className: 'slider-value' }, range.value);
+        range.addEventListener('input', () => (out.textContent = range.value));
+        range.setAttribute('aria-labelledby', titleId);
+        body.append(range, out);
+        read = () => range.value;
+        first = range;
+      } else if (type === 'ip') {
+        const parts = [0, 1, 2, 3].map((i) => {
+          const n = el('input', { className: 'text-input ip-part', type: 'number', min: '0', max: '255', value: String(v[i] ?? 0) });
+          n.setAttribute('aria-label', `${i + 1}つ目`);
+          return n;
+        });
+        const row = el('div', { className: 'ip-input' });
+        parts.forEach((n, i) => row.append(...(i ? [el('span', {}, '.'), n] : [n])));
+        row.setAttribute('aria-labelledby', titleId);
+        body.appendChild(row);
+        read = () => parts.map((n) => Math.min(255, Math.max(0, Number(n.value) || 0))).join('.');
+        first = parts[0];
+      } else {
+        const input = el('input', {
+          className: 'text-input',
+          type: type === 'password' ? 'password' : 'text',
+          value: opts.defaultText ?? '',
+          autocomplete: 'off',
+        });
+        if (opts.placeholder) input.placeholder = opts.placeholder;
+        if (opts.limit) input.maxLength = opts.limit;
+        input.setAttribute('aria-labelledby', titleId);
+        body.appendChild(input);
+        read = () => input.value;
+        first = input;
+      }
       let timer: number | undefined;
       let done = false;
-      const finish = (v: InputBoxResult) => {
+      const finish = (r: InputBoxResult) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
         if (this.current?.finish === finish) this.current = undefined;
         if (root.open) root.close();
-        resolve(v);
+        resolve(r);
       };
       const closed = () => finish({ cancelled: 'close' });
       form.addEventListener('submit', (e) => {
         e.preventDefault();
-        finish({ value: input.value });
+        finish({ value: read() });
       });
-      root.addEventListener('cancel', closed);
+      root.addEventListener('cancel', (e) => {
+        if (opts.noClose) e.preventDefault();
+        else closed();
+      });
       root.addEventListener('close', closed);
+      if (opts.noClose) root.querySelector('.dialog-close')?.remove();
       const send = button('送信', 'primary', undefined, { submit: true });
-      actions.append(button('キャンセル', 'secondary', closed), send);
+      if (opts.noClose) actions.append(send);
+      else actions.append(button('キャンセル', 'secondary', closed), send);
       if (opts.timeout && opts.timeout > 0) timer = window.setTimeout(() => finish({ cancelled: 'timeout' }), opts.timeout);
       this.current = { finish };
       root.showModal();
-      input.focus();
-      input.select();
+      first.focus();
+      if (first instanceof HTMLInputElement && first.type === 'text') first.select();
     });
   }
 
@@ -168,6 +258,12 @@ export interface ToastOptions {
   error?: boolean;
   actions?: { label: string; run(): void }[];
   duration?: number;
+  /** 通知の本文を押した (トレイのバルーンのクリック) */
+  onClick?(): void;
+  /** 本文を押さずに消えた (時間切れ・✕・アクション) */
+  onClose?(): void;
+  /** 見出し (トレイのバルーンのタイトル) */
+  title?: string;
 }
 
 /**
@@ -199,12 +295,16 @@ export class Toasts {
   }
 
   show(message: string, opts: ToastOptions = {}): void {
-    const toast = el('div', { className: `toast${opts.error ? ' toast-error' : ''}` }, el('span', { className: 'toast-text' }, message));
+    const text = el('span', { className: 'toast-text' }, ...(opts.title ? [el('strong', { className: 'toast-title' }, opts.title), el('br'), message] : [message]));
+    const toast = el('div', { className: `toast${opts.error ? ' toast-error' : ''}` }, text);
     if (opts.error) toast.setAttribute('role', 'alert');
     let timer: number | undefined;
     let hovered = false;
+    let clicked = false;
     const remove = () => {
       clearTimeout(timer);
+      if (!toast.isConnected) return;
+      if (!clicked) opts.onClose?.();
       const hadFocus = toast.contains(document.activeElement);
       toast.remove();
       if (hadFocus) this.fallbackFocus()?.focus();
@@ -235,6 +335,23 @@ export class Toasts {
           a.run();
         }),
       );
+    }
+    if (opts.onClick) {
+      text.classList.add('toast-clickable');
+      text.tabIndex = 0;
+      text.setAttribute('role', 'button');
+      const click = () => {
+        clicked = true;
+        remove();
+        opts.onClick?.();
+      };
+      text.addEventListener('click', click);
+      text.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          click();
+        }
+      });
     }
     toast.appendChild(button('✕', 'icon', remove, { ariaLabel: '閉じる' }));
     this.box.appendChild(toast);
@@ -284,7 +401,13 @@ export interface OptionsModel {
   balloonTimeout: number;
   choiceTimeout: number;
   scale: number;
+  /** バルーンの拡大率 (シェルと別にする) */
+  balloonScale: number;
   userName: string;
+  /** 音声合成で読み上げる */
+  speech: boolean;
+  /** 他のゴーストが SSTP などで割り込むのを受ける */
+  acceptSstp: boolean;
 }
 
 /** 入力欄の範囲。保存時の丸めにも同じ値を使う */
@@ -324,6 +447,10 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
   const balloon = number(Math.round(model.balloonTimeout / 1000), LIMITS.seconds);
   const choice = number(Math.round(model.choiceTimeout / 1000), LIMITS.seconds);
   const scale = number(Math.round(model.scale * 100), LIMITS.scale);
+  const balloonScale = number(Math.round(model.balloonScale * 100), LIMITS.scale);
+  const check = (checked: boolean) => el('input', { type: 'checkbox', className: 'check-input', checked });
+  const speech = check(model.speech);
+  const sstp = check(model.acceptSstp);
   // 空白だけの呼び名もブラウザの検証で止める (黙って前の名前に戻さない)
   const user = el('input', {
     className: 'text-input',
@@ -340,7 +467,11 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
     field('文字の表示間隔 (ms)', talkWait),
     field('バルーンのタイムアウト (秒)', balloon, '0 で無効'),
     field('選択肢のタイムアウト (秒)', choice, '0 で無効'),
-    field('拡大率 (%)', scale),
+    field('シェルの拡大率 (%)', scale),
+    field('バルーンの拡大率 (%)', balloonScale),
+    field('喋った言葉を読み上げる', speech, 'ブラウザの音声合成を使います (\\__v[disable] の所は読みません)'),
+    section('連携'),
+    field('よそのページからの SSTP を受ける', sstp, 'ほかのページやアプリが postMessage で送る SSTP を、ゴーストに渡します'),
     section('ユーザー'),
     field('呼び名', user, 'ゴーストがあなたの呼び名を知らないときに使います'),
   );
@@ -354,7 +485,10 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
       balloonTimeout: clamp(balloon.valueAsNumber, LIMITS.seconds) * 1000,
       choiceTimeout: clamp(choice.valueAsNumber, LIMITS.seconds) * 1000,
       scale: clamp(scale.valueAsNumber, LIMITS.scale) / 100,
+      balloonScale: clamp(balloonScale.valueAsNumber, LIMITS.scale) / 100,
       userName: user.value.trim() || model.userName,
+      speech: speech.checked,
+      acceptSstp: sstp.checked,
     };
     // 先に閉じてから保存する (保存の結果はダイアログの外の通知で知らせるため)
     root.close();
@@ -455,4 +589,30 @@ export function showHelp(markdown: string): void {
   root.showModal();
   body.scrollTop = 0;
   close.focus();
+}
+
+/** 読むだけの文 (readme・terms・ログなど)。pre なら等幅のまま */
+export function showText(title: string, text: string, opts: { pre?: boolean; actions?: { label: string; run(): void }[] } = {}): void {
+  const { root, body, actions, titleId } = dialog('help-dialog', title);
+  body.appendChild(opts.pre === false ? el('div', { className: 'plain-text' }, text) : el('pre', { className: 'license-text' }, text));
+  body.tabIndex = 0;
+  body.setAttribute('role', 'document');
+  body.setAttribute('aria-labelledby', titleId);
+  for (const a of opts.actions ?? []) actions.appendChild(button(a.label, 'secondary', a.run));
+  const close = button('閉じる', 'primary', () => root.close());
+  actions.appendChild(close);
+  root.showModal();
+  body.scrollTop = 0;
+  close.focus();
+}
+
+/** 自由な中身のダイアログ (開発用パレット・サーフェステストなど)。閉じたら onClose */
+export function showPanel(title: string, content: HTMLElement, onClose?: () => void): { close(): void } {
+  const { root, body, actions } = dialog('panel-dialog', title);
+  body.appendChild(content);
+  const close = button('閉じる', 'primary', () => root.close());
+  actions.appendChild(close);
+  root.addEventListener('close', () => onClose?.());
+  root.showModal();
+  return { close: () => root.close() };
 }

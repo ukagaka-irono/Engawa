@@ -63,16 +63,19 @@ Internet Explorer には対応していません。
 
 | 分野 | 対応しているもの |
 |---|---|
-| パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory` と番号付きの `balloonN.directory` 同梱)、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む) |
+| パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory` と番号付きの `balloonN.directory` 同梱)、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む)、URL からのインストール (`\![execute,install,url]`・URL のドロップ)、インストール後の readme、ネットワーク更新 (`updates2.dau` / `updates.txt`。配布先が CORS を許しているときだけ)、消滅 (`\![vanishbymyself]`・メニューの消滅指示) |
 | SHIORI | SHIORI/3.0 (GET / NOTIFY)、SHIORI/2.x (読み替え)、DLL 製 SHIORI を WebAssembly にしたもの (下記)、JavaScript 製 SHIORI (Web Worker 内で実行)、セーブデータの書き込み |
 | SAORI | SAORI/1.0。JavaScript で作り直したものと、WebAssembly にしたもの (下記)。どの SHIORI からも呼べる |
-| シェル | `surfaces.txt` / `surfaces*.txt` (新旧書式、MATERIA 式の見出し、`surface.append`、範囲指定、数字と名前のエイリアス)、element 合成 (element0 が無ければ surfaceN.png の上に重ねる)、`.pna` / `use_self_alpha` (1・true・full) / 左上色の透過、collision / collisionex |
-| SERIKO | sometimes / rarely / random / periodic / always / runonce / talk / yen-e / never / bind、overlay・overlay-fast・base・replace・interpolate・reduce・asis・move・start・stop・alternativestart など、`-1` / `-2`、`option,exclusive` (ID 指定可) / `background` |
+| シェル | `surfaces.txt` / `surfaces*.txt` (新旧書式、MATERIA 式の見出し、`surface.append`、範囲指定、数字と名前のエイリアス)、element 合成 (element0 が無ければ surfaceN.png の上に重ねる、`--option` の切り抜き・拡大・透明度)、合成メソッド (multiply・screen・overlay・add など)、`.pna` / `use_self_alpha` (1・true・full) / 左上色の透過、collision / collisionex (region を含む)、`collision-sort` / `animation-sort`、cursor・tooltips ブレス、`point.basepos`、`balloon.offset*` (サーフェスごと・左右別)、`seriko.alignmenttodesktop`・`seriko.zorder`・`seriko.sticky-window`・`balloon.dontmove`・`sakura.defaultx` など既定の位置 |
+| SERIKO | sometimes / rarely / random / periodic / always / runonce / talk / yen-e / never / bind / starttalk / endtalk、overlay・overlay-fast・base・replace・interpolate・reduce・asis・move・start・stop・alternativestart など、`-1` / `-2`、`option,exclusive` (ID 指定可) / `background` / `shared-index`、アニメーションの名前 |
 | 着せ替え | `bindgroup` (メニューと `\![bind]`) |
-| バルーン | 画像バルーン (`balloons*.png` / `balloonk*.png`、descript と画像ごとの `balloons*s.txt`)、内蔵バルーン、左右の自動切り替え (キャラクターに被らない側) |
-| さくらスクリプト | `\0 \1 \p \s \i \b \n \n[half] \n[150] \w \_w \__w \_q \_s \c \x \e \- \q (新旧書式) \__q \_a \f \_l \_b \& \_u \_m \8 \_v \_V \j \__c \* \_?`、`%` 環境変数、`%property[]` |
-| `\![...]` | raise / notify / timerraise / timernotify / change,ghost・shell・balloon / call,ghost / open,inputbox・passwordinput・communicatebox・browser / bind / anim / sound / get,property / set,balloontimeout・choicetimeout・balloonwait / quicksection |
-| イベント | 起動・終了・切り替え・呼び出し (OnGhostCallComplete / OnOtherGhostBooted / OnOtherGhostClosed)、マウス (クリック・ダブルクリック・移動・ホイール・出入り。重なったキャラクターはピクセル単位で判定)、キー、OnSecondChange / OnMinuteChange、OnSurfaceRestore、選択肢・アンカー (Ex を含む)、入力ボックス、シェル・バルーン・着せ替えの変更、インストール (Begin / Complete / Failure / Refuse) |
+| バルーン | 画像バルーン (`balloons*.png` / `balloonk*.png`、descript と画像ごとの `balloons*s.txt`)、内蔵バルーン、左右の自動切り替え (キャラクターに被らない側)、矢印・クリック待ち・オンライン・SSTP のマーカーと送り主・ファイル数、カーソルとアンカーのマーカー (色・枠・下線)、文字の影・縁取り、ドラッグで動かす、拡大率 (シェルと別) |
+| さくらスクリプト | `\0 \1 \p \s \i \b \n \n[half] \n[150] \w \_w \__w \_q \_s \c \x \t \e \- \+ \_+ \4 \5 \v \a \q (新旧書式) \__q \_a \f (align・valign・影・縁取り・マーカーの色を含む) \_n \_l \_b (切り抜き・拡大・前面・固定) \& \_u \_m \8 \_v \_V \__v \j \__c \__t \* \_?`、`%` 環境変数 (`%ms` などの言葉を含む)、`%property[]`、音声合成での読み上げ (オプション) |
+| `\![...]` | raise / notify / embed / raiseother / notifyother / timerraise / timernotify / timerraiseother / timernotifyother、change・call (random・sequential・lastinstalled)、open (inputbox・passwordinput・textareabox・dateinput・timeinput・sliderinput・ipinput・communicatebox・teachbox・dialog・browser・mailer・file・readme・terms・developer・surfacetest・aigraph・rateofusegraph・backlogviewer・errorlog など) / close、set (balloontimeout・choicetimeout・balloonwait・serikotalk・autoscroll・balloonoffset・balloonalign・balloonmarker・balloonnum・scaling・alpha・position・zorder・sticky-window・alignmenttodesktop・windowstate・property・otherghosttalk・othersurfacechange・syncobject・tasktrayicon・trayballoon) / reset、enter・leave (passivemode・inductionmode・onlinemode・nouserbreakmode・collisionmode)、lock・unlock (repaint・balloonrepaint・balloonmove)、bind / bind-noevent、anim (start・stop・pause・resume・offset・add)、sound (play・loop・load・pause・resume・stop・option・wait)、move / moveasync、wait,syncobject、execute (http-*・rss-*・install・extractarchive・compressarchive・createnar・createupdatedata・dumpsurface・resetwindowpos・resetballoonpos)、get,property / set,property、vanishbymyself、update / updatebymyself、reload / load / unload、quicksection |
+| イベント | 起動・終了・切り替え・呼び出し (OnInitialize / OnDestroy / OnCloseAll / OnGhostCalling / OnGhostCallComplete / OnOtherGhostBooted / OnOtherGhostClosed / OnVanished / OnOtherGhostVanished)、マウス (Down / Up / クリック / ダブルクリック / 3回以上 / 中ボタン / 移動 / 静止 / ホイール / ドラッグ / 当たり判定とキャラクターの出入り。重なったキャラクターはピクセル単位で判定)、キー、OnSecondChange / OnMinuteChange / OnHourTimeSignal、OnSurfaceChange / OnSurfaceRestore / OnOtherSurfaceChange、OnOverlap / OnOffscreen、選択肢・アンカー (Select・Ex・Enter・Hover・タイムアウト)、OnBalloonBreak / OnBalloonClose / OnBalloonTimeout、入力ボックス (OnUserInput / OnTextAreaInput / OnTeach / OnSystemDialog など)、OnTranslate、OnOtherGhostTalk、シェル・バルーン・着せ替えの変更、OnShellScaling / OnBalloonScaling、OnWindowStateMinimize / Restore、OnResetWindowPos、ファイル・URL・文字のドロップ、音 (OnSoundStop / OnSoundError)、HTTP・RSS、ネットワーク更新、消滅、トレイの通知、OnRecommendsiteChoice、インストール (Begin / Complete / Failure / Refuse)、起動時の NOTIFY (installedsakuraname・uniqueid・capability・OnNotifySelfInfo など) |
+| プロパティ | system.* (ブラウザで分かるもの)、baseware.*、ghostlist / activeghostlist / balloonlist / history / rateofuselist、currentghost.* (scope・shelllist・balloon・status・seriko の cursor・tooltip・surfacelist・sticky-window・zorder・mousecursor・sound)、developer.log。[SET有効] のものは書き込める |
+| SSTP | SEND / NOTIFY / COMMUNICATE / EXECUTE / GIVE (下記の開発用 API と postMessage で受ける。ポート 9801 では待てない) |
+| 道具 | 開発用パレット、サーフェステスト、スクリプトログ、エラーログ、SHIORI リクエスト、使用率グラフ、AI グラフ、着せ替え一覧、画像ビューア、アーカイブビューア、readme / terms、最小化、位置のリセット、最近使ったゴースト |
 
 ### SHIORI について
 
@@ -183,12 +186,24 @@ SHIORI からは `globalThis.engawa` でゴーストのファイルを読み書�
 
 ### 開発用 API
 
-ブラウザのコンソールから、前面のゴーストにスクリプトを送れます (SSTP の代わり)。
+ブラウザのコンソールから、前面のゴーストにスクリプトを送れます。`engawa.sstp` は SSTP の要求文を受けて応答文を返します。
 
 ```js
 engawa.send('\\0\\s[5]こんにちは。\\e');
 engawa.raise('OnBoot');
+await engawa.sstp('SEND SSTP/1.4\r\nSender: テスト\r\nScript: \\0やあ\\e\r\n\r\n');
 ```
+
+よそのページやフレームからは `postMessage` で SSTP を送れます (オプションの「よそのページからの SSTP を受ける」を切ると 420 Refuse を返します)。
+
+```js
+engawaWindow.postMessage({ type: 'sstp', id: 1, request: 'NOTIFY SSTP/1.1\r\nSender: アプリ\r\nEvent: OnMusicPlay\r\nReference0: 曲名\r\n\r\n' }, '*');
+// 応答は { type: 'sstp-response', id: 1, response: 'SSTP/1.4 200 OK…' } で返ってくる
+```
+
+### ブラウザではできないこと
+
+DLL のプラグイン・ヘッドラインの実行、FMO、ポート 9801 の SSTP、時計合わせ (SNTP)、メールチェック (biff)、ping・nslookup・filewatch・ごみ箱、壁紙、ほかのアプリのウインドウ (OnOverlap などはゴースト自身のキャラクターだけ)、エディタ・エクスプローラなどほかのアプリを開くこと、CD の再生、`\m` (ウインドウメッセージ)。`\![open,dialog,folder]` は取り消しとして扱い、`\![open,dialog,save]` はダウンロードになります。
 
 ## 構成
 

@@ -77,7 +77,7 @@ const EMBED_RULES = `
 }
 html.over-character,
 html.over-character * {
-  cursor: pointer !important;
+  cursor: var(--engawa-cursor, pointer) !important;
 }
 `;
 

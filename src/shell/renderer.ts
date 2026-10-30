@@ -1,4 +1,4 @@
-import { drawWithMethod, type Shell } from './shell';
+import { applyDrawOptions, drawWithMethod, type Shell } from './shell';
 import { hitCollision, type AnimationDef, type CollisionDef, type PatternDef, type SurfaceDef } from './surfaces';
 
 interface AnimState {
@@ -9,6 +9,18 @@ interface AnimState {
   frame?: PatternDef;
   /** start() のたびに増える。パターンの途中で自分自身を開始し直したかの判定用 */
   run: number;
+  /** \![anim,pause] で止めている (止めた時刻) */
+  pausedAt?: number;
+  /** \![anim,offset] でずらした量 */
+  offset?: { x: number; y: number };
+}
+
+/** \![anim,add,…] で今のサーフェスに足したもの (サーフェスを替えるまで) */
+interface AddedLayer {
+  method: string;
+  surface: number;
+  x: number;
+  y: number;
 }
 
 const CONTROL = new Set(['start', 'stop', 'alternativestart', 'alternativestop', 'parallelstart', 'parallelstop']);
@@ -47,6 +59,17 @@ export class SurfaceRenderer {
   /** surfaceId / def を適用したときのシェル */
   private appliedShell?: Shell;
   private readonly endWaiters = new Map<number, (() => void)[]>();
+  /** \![lock,repaint] の間は描き直さない */
+  private repaintLocked = false;
+  private added: AddedLayer[] = [];
+  /** \![anim,add,base] で替えたベース */
+  private addedBase?: number;
+  /** \![anim,add,move] でずらした量 */
+  private addedMove?: { x: number; y: number };
+  /** \![enter,collisionmode] の間 */
+  private collisionMode?: 'rect' | 'name';
+  /** starttalk を起こした (この後スコープを離れたら endtalk) */
+  private talking = false;
   private readonly ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
 
   constructor(
@@ -145,15 +168,29 @@ export class SurfaceRenderer {
     const def = shell.surfaces.surfaces.get(id);
     // アニメーションで使うサーフェスも先読みしておく
     if (def) for (const a of def.animations.values()) for (const p of a.patterns) if (p.surface >= 0) void shell.load(p.surface, p.method === 'asis');
+    // shared-index: 前のサーフェスと次のサーフェスの両方で指定したアニメーションは、同じコマから続ける
+    const carried = new Map<number, AnimState>();
+    for (const st of this.anims.values()) if (st.playing && st.def.sharedIndex) carried.set(st.def.id, st);
     this.stopAll();
     this.surfaceId = id;
     this.def = def;
     this.appliedShell = shell;
+    this.added = [];
+    this.addedBase = undefined;
+    this.addedMove = undefined;
     this.anims = new Map(
       [...(def?.animations.values() ?? [])].map((a) => [a.id, { def: a, playing: false, index: 0, nextAt: 0, run: 0 }]),
     );
     const now = performance.now();
     for (const st of this.anims.values()) {
+      const prev = carried.get(st.def.id);
+      if (prev && st.def.sharedIndex && prev.index < st.def.patterns.length) {
+        st.playing = true;
+        st.index = prev.index;
+        st.nextAt = prev.nextAt;
+        st.frame = st.def.patterns[Math.max(0, prev.index - 1)];
+        continue;
+      }
       if (st.def.intervals.includes('runonce') || st.def.intervals.includes('always')) this.start(st, now);
     }
     // 配置計算で大きさを使うので、次のフレームを待たずに描く
@@ -175,6 +212,17 @@ export class SurfaceRenderer {
     this.dirty = true;
   }
 
+  /** 実行中のアニメーション (currentghost.scope(n).animation.num) */
+  playingIds(): number[] {
+    return [...this.anims.values()].filter((a) => a.playing).map((a) => a.def.id);
+  }
+
+  /** \![enter,collisionmode]: 当たり判定を描く (rect なら枠だけ) */
+  showCollisions(mode: 'rect' | 'name' | undefined): void {
+    this.collisionMode = mode;
+    this.dirty = true;
+  }
+
   isPlaying(animId: number): boolean {
     return this.anims.get(animId)?.playing ?? false;
   }
@@ -190,6 +238,61 @@ export class SurfaceRenderer {
 
   invalidate(): void {
     this.dirty = true;
+  }
+
+  /** \![lock,repaint] / \![unlock,repaint]。止めている間もアニメーションは進む */
+  setRepaintLocked(locked: boolean): void {
+    this.repaintLocked = locked;
+    if (!locked) this.dirty = true;
+  }
+
+  /** \![anim,pause,ID] / \![anim,resume,ID] */
+  pause(animId: number, paused: boolean): void {
+    const st = this.anims.get(animId);
+    if (!st) return;
+    const now = performance.now();
+    if (paused && st.pausedAt === undefined) st.pausedAt = now;
+    else if (!paused && st.pausedAt !== undefined) {
+      st.nextAt += now - st.pausedAt;
+      st.pausedAt = undefined;
+    }
+  }
+
+  /** \![anim,offset,ID,x,y]。着せ替えもずらせる */
+  offset(animId: number, x: number, y: number): void {
+    const st = this.anims.get(animId);
+    if (!st) return;
+    st.offset = { x, y };
+    this.dirty = true;
+  }
+
+  /** \![anim,add,overlay|overlayfast,ID,x,y] / \![anim,add,base,ID] / \![anim,add,move,x,y] */
+  add(method: string, surface: number, x: number, y: number): void {
+    if (method === 'base') this.addedBase = surface;
+    else if (method === 'move') this.addedMove = { x, y };
+    else this.added.push({ method, surface, x, y });
+    if (surface >= 0) void this.shell.load(surface);
+    this.dirty = true;
+  }
+
+  /** そのスコープが喋り始めた (starttalk)・喋り終えた (endtalk) */
+  talkStart(): void {
+    if (this.talking) return;
+    this.talking = true;
+    const now = performance.now();
+    for (const st of this.anims.values()) if (st.def.intervals.includes('starttalk')) this.start(st, now);
+  }
+
+  talkEnd(): void {
+    if (!this.talking) return;
+    this.talking = false;
+    const now = performance.now();
+    for (const st of this.anims.values()) if (st.def.intervals.includes('endtalk')) this.start(st, now);
+  }
+
+  /** アニメーションの名前 (animation*.name) か番号を、今のサーフェスの ID にする */
+  animationId(arg: string): number | undefined {
+    return this.shell.animationId(this.surfaceId, arg);
   }
 
   /** 1秒ごとの確率起動 (sometimes / rarely / random / periodic)。 */
@@ -226,13 +329,17 @@ export class SurfaceRenderer {
 
   collisionAt(x: number, y: number): CollisionDef | undefined {
     if (!this.def) return undefined;
+    const sort = this.shell.surfaces.collisionSort;
+    const region = (c: CollisionDef, cx: number, cy: number) => this.shell.regionAt(c, cx, cy);
     for (const st of [...this.anims.values()].reverse()) {
-      if ((st.playing || st.frame) && st.def.collisions.length) {
-        const hit = hitCollision(st.def.collisions, x, y);
+      // 着せ替えの当たり判定は、着ているときだけ
+      const active = st.def.intervals.includes('bind') ? this.bindEnabled(st.def.id) : st.playing || st.frame;
+      if (active && st.def.collisions.length) {
+        const hit = hitCollision(st.def.collisions, x, y, sort, region);
         if (hit) return hit;
       }
     }
-    return hitCollision(this.def.collisions, x, y);
+    return hitCollision(this.def.collisions, x, y, sort, region);
   }
 
   opaqueAt(x: number, y: number): boolean {
@@ -244,7 +351,7 @@ export class SurfaceRenderer {
   tick(now: number): void {
     for (const st of this.anims.values()) {
       let steps = 0;
-      while (st.playing && now >= st.nextAt && steps++ < MAX_STEPS_PER_TICK) {
+      while (st.playing && st.pausedAt === undefined && now >= st.nextAt && steps++ < MAX_STEPS_PER_TICK) {
         const p = st.def.patterns[st.index];
         const run = st.run;
         if (p) this.applyPattern(st, p, now);
@@ -255,7 +362,7 @@ export class SurfaceRenderer {
         else st.nextAt += randomWait(st.def.patterns[st.index].wait);
       }
     }
-    if (this.dirty) this.draw();
+    if (this.dirty && !this.repaintLocked) this.draw();
   }
 
   /** 最後のパターンまで来た。always なら最初から、それ以外は終了 */
@@ -332,13 +439,13 @@ export class SurfaceRenderer {
       }
       return;
     }
-    if (p.surface === -1) {
+    if (p.surface === -1 && p.surfaceName === undefined) {
       // -1: このアニメーションを止める
       st.frame = undefined;
       this.endCycle(st, now);
       // endCycle で always が先頭へ戻った場合も、ここで index を進めないよう run を変える
       st.run++;
-    } else if (p.surface === -2) {
+    } else if (p.surface === -2 && p.surfaceName === undefined) {
       // -2: 実行中の他のアニメーションをすべて止める。このコマ自体は何も描かない
       for (const o of this.anims.values()) {
         if (o === st || !o.playing || o.def.intervals.includes('bind')) continue;
@@ -358,39 +465,99 @@ export class SurfaceRenderer {
       this.resize(0, 0);
       return;
     }
-    const anims = [...this.anims.values()].sort((a, b) => a.def.id - b.def.id);
+    // animation-sort: 既定 (descend) は番号の大きいものほど手前、ascend は小さいものほど手前
+    const ascend = this.shell.surfaces.animationSort === 'ascend';
+    const anims = [...this.anims.values()].sort((a, b) => (ascend ? b.def.id - a.def.id : a.def.id - b.def.id));
 
-    // base メソッドのフレームは土台を差し替える (そのサーフェスが無ければ元の土台のまま)
-    const baseFrame = anims.filter((a) => a.frame?.method === 'base' && a.frame.surface >= 0).pop()?.frame;
+    // base メソッドのフレームは土台を差し替える (そのサーフェスが無ければ元の土台のまま)。
+    // 着せ替えでは最初のパターンの base だけが有効 (着ているときだけ)
+    const bindBase = anims
+      .filter((a) => a.def.intervals.includes('bind') && this.bindEnabled(a.def.id) && a.def.patterns[0]?.method === 'base')
+      .pop()?.def.patterns[0];
+    const baseFrame = anims.filter((a) => a.frame?.method === 'base' && a.frame.surface >= 0).pop()?.frame ?? bindBase;
     const own = this.surface(this.surfaceId);
-    const base = (baseFrame && this.surface(baseFrame.surface)) || own;
+    const baseId = this.addedBase ?? (baseFrame ? this.patternSurface(baseFrame) : undefined);
+    const base = (baseId !== undefined && this.surface(baseId)) || own;
     if (!base) return;
     this.resize(base.width, base.height);
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.save();
-    const move = anims.filter((a) => a.frame?.method === 'move').pop()?.frame;
+    const move = this.addedMove ?? anims.filter((a) => a.frame?.method === 'move').pop()?.frame;
     if (move) ctx.translate(move.x, move.y);
 
     const layers = (st: AnimState): void => {
+      const off = st.offset;
+      if (off) {
+        ctx.save();
+        ctx.translate(off.x, off.y);
+      }
       if (st.def.intervals.includes('bind')) {
-        if (!this.bindEnabled(st.def.id)) return;
-        for (const p of st.def.patterns) this.drawPattern(p);
+        if (this.bindEnabled(st.def.id)) {
+          st.def.patterns.forEach((p, i) => {
+            if (i === 0 && p.method === 'base') return;
+            this.drawPattern(p);
+          });
+        }
       } else if (st.frame && st.frame.method !== 'base' && st.frame.method !== 'move') {
         this.drawPattern(st.frame);
       }
+      if (off) ctx.restore();
     };
     // background のアニメーションはベースの後ろ (画面奥) にあるので、先に描いてからベースを重ねる
     for (const st of anims) if (st.def.background) layers(st);
     ctx.drawImage(base, 0, 0);
     for (const st of anims) if (!st.def.background) layers(st);
+    for (const a of this.added) {
+      const img = this.surface(a.surface);
+      if (img) drawWithMethod(ctx, img, a.method, a.x, a.y);
+    }
+    ctx.restore();
+    if (this.collisionMode) this.drawCollisions();
+  }
+
+  /** 当たり判定の枠と名前 (開発用) */
+  private drawCollisions(): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
+    ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
+    ctx.font = '10px sans-serif';
+    for (const c of this.def?.collisions ?? []) {
+      const p = c.coords;
+      ctx.beginPath();
+      if (c.shape === 'polygon') {
+        for (let i = 0; i + 1 < p.length; i += 2) (i ? ctx.lineTo : ctx.moveTo).call(ctx, p[i], p[i + 1]);
+        ctx.closePath();
+      } else if (c.shape === 'ellipse' || c.shape === 'circle') {
+        const [l = 0, t = 0, r = 0, b = 0] = c.shape === 'circle' ? [p[0] - p[2], p[1] - p[2], p[0] + p[2], p[1] + p[2]] : p;
+        ctx.ellipse((l + r) / 2, (t + b) / 2, Math.abs(r - l) / 2, Math.abs(b - t) / 2, 0, 0, Math.PI * 2);
+      } else {
+        const [l = 0, t = 0, r = 0, b = 0] = p;
+        ctx.rect(l, t, r - l, b - t);
+      }
+      ctx.fill();
+      ctx.stroke();
+      if (this.collisionMode === 'name' && p.length >= 2) {
+        ctx.fillStyle = 'rgba(160, 0, 0, 1)';
+        ctx.fillText(c.name, p[0] + 2, p[1] + 10);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
+      }
+    }
     ctx.restore();
   }
 
+  /** パターンの描くサーフェス (名前で書いたものはここで番号にする) */
+  private patternSurface(p: PatternDef): number {
+    return p.surfaceName !== undefined ? (this.shell.surfaceByName(p.surfaceName) ?? -1) : p.surface;
+  }
+
   private drawPattern(p: PatternDef): void {
-    if (p.surface < 0 || CONTROL.has(p.method)) return;
-    const img = p.method === 'asis' ? this.rawSurface(p.surface) : this.surface(p.surface);
-    if (img) drawWithMethod(this.ctx, img, p.method, p.x, p.y);
+    const id = this.patternSurface(p);
+    if (id < 0 || CONTROL.has(p.method)) return;
+    const raw = p.method === 'asis' ? this.rawSurface(id) : this.surface(id);
+    if (raw) drawWithMethod(this.ctx, applyDrawOptions(raw, p), p.method, p.x, p.y, p.alpha ?? 1);
   }
 
   private surface(id: number): HTMLCanvasElement | undefined {

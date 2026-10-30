@@ -29,6 +29,10 @@ function fakeHost(wait: number) {
     waitSound: async () => {},
     openUrl: noop,
     imageUrl: async () => undefined,
+    moveScope: async () => {},
+    setTimeCritical: noop,
+    embed: async () => undefined,
+    speak: noop,
   };
   return { host, text, commands };
 }
