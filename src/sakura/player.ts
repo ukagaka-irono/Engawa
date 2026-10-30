@@ -95,6 +95,8 @@ export class ScriptPlayer {
   private waiter?: () => void;
   private clickWaiter?: () => void;
   private waitRate = 1;
+  /** クイックセクション (\_q・\![quicksection]) の中: 文字をウェイト無しで出す */
+  private quickSection = false;
 
   constructor(private readonly host: PlayerHost) {}
 
@@ -128,8 +130,8 @@ export class ScriptPlayer {
     this.playing = true;
     this.skipping = false;
     this.waitRate = 1;
+    this.quickSection = false;
     let scope = 0;
-    let quick = false;
     let sync: number[] | null = null;
     let font: FontState = {};
     let start = performance.now();
@@ -154,7 +156,7 @@ export class ScriptPlayer {
           host.talkChar(sc);
         }
         if (link) link.title += ch;
-        if (!quick) await this.wait(host.talkWait() * this.waitRate);
+        if (!this.quickSection) await this.wait(host.talkWait() * this.waitRate);
         if (!alive()) return;
       }
     };
@@ -217,7 +219,7 @@ export class ScriptPlayer {
           else await this.wait(start + (Number(a[0]) || 0) - performance.now());
           break;
         case '_q':
-          quick = !quick;
+          this.quickSection = !this.quickSection;
           break;
         case '_s':
           sync = sync ? null : a.length ? a.map(Number) : [0, 1];
@@ -342,7 +344,11 @@ export class ScriptPlayer {
 
   private async command(a: string[], scope: number): Promise<void> {
     const [cmd = '', sub = ''] = a.map((s) => s.trim().toLowerCase());
-    if (cmd === 'quicksession') return;
+    // \![quicksection,true|1] / \![quicksection,false|0]: \_q と同じクイックセクションを、切り替えでなく開始・終了で指定する
+    if (cmd === 'quicksection') {
+      this.quickSection = sub === 'true' || sub === '1';
+      return;
+    }
     if (cmd === 'set' && sub === 'balloonwait') {
       this.waitRate = Math.max(0, Number(a[2]) || 1);
       return;

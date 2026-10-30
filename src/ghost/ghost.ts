@@ -14,6 +14,7 @@ import { copyText } from '../util/clipboard';
 import { loadTransparentImage } from '../util/image';
 import { joinPath, normalizePath, type FileTree } from '../vfs/files';
 import { writePackageFile, type PackageMeta } from '../vfs/storage';
+import { ghostListProperty } from './ghostlist';
 import { ghostState, saveSettings, settings, type GhostState } from './settings';
 
 export const BASEWARE_NAME = 'Engawa';
@@ -903,12 +904,10 @@ export class Ghost implements PlayerHost {
       const r = s.view.rect();
       return String(Math.round(field === 'x' ? r.left : r.top));
     }
-    m = /^ghostlist\((\d+)\)\.(name|path)$/.exec(p);
-    if (m) {
-      const g = ghosts[Number(m[1])];
-      return g ? (m[2] === 'name' ? g.name : g.key) : '';
-    }
-    return '';
+    // ghostlist(名前/本体側名/パス).項目 など (起動中のゴーストは、相方の名前・作者なども答える)
+    const active = [this, ...this.env.others(this)].map((g) => ({ name: g.name, sakuraName: g.sakuraName, path: g.key, keroName: g.keroName, descript: g.descript }));
+    const installed = ghosts.map((g) => active.find((a) => a.path === g.key) ?? { name: g.name, sakuraName: g.sakuraName ?? '', path: g.key });
+    return ghostListProperty(p, installed, active, this.key) ?? '';
   }
 
   /** 選択肢。再生中のスクリプトは止める (そうしないと残りの文字がバルーンを出し直す) */

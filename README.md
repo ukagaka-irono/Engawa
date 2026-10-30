@@ -71,7 +71,7 @@ Internet Explorer には対応していません。
 | 着せ替え | `bindgroup` (メニューと `\![bind]`) |
 | バルーン | 画像バルーン (`balloons*.png` / `balloonk*.png`、descript と画像ごとの `balloons*s.txt`)、内蔵バルーン、左右の自動切り替え (キャラクターに被らない側) |
 | さくらスクリプト | `\0 \1 \p \s \i \b \n \n[half] \n[150] \w \_w \__w \_q \_s \c \x \e \- \q (新旧書式) \__q \_a \f \_l \_b \& \_u \_m \8 \_v \_V \j \__c \* \_?`、`%` 環境変数、`%property[]` |
-| `\![...]` | raise / notify / timerraise / timernotify / change,ghost・shell・balloon / call,ghost / open,inputbox・passwordinput・communicatebox・browser / bind / anim / sound / get,property / set,balloontimeout・choicetimeout |
+| `\![...]` | raise / notify / timerraise / timernotify / change,ghost・shell・balloon / call,ghost / open,inputbox・passwordinput・communicatebox・browser / bind / anim / sound / get,property / set,balloontimeout・choicetimeout・balloonwait / quicksection |
 | イベント | 起動・終了・切り替え・呼び出し (OnGhostCallComplete / OnOtherGhostBooted / OnOtherGhostClosed)、マウス (クリック・ダブルクリック・移動・ホイール・出入り。重なったキャラクターはピクセル単位で判定)、キー、OnSecondChange / OnMinuteChange、OnSurfaceRestore、選択肢・アンカー (Ex を含む)、入力ボックス、シェル・バルーン・着せ替えの変更、インストール (Begin / Complete / Failure / Refuse) |
 
 ### SHIORI について
