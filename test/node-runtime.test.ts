@@ -58,6 +58,29 @@ describe('SHIOLINK の Node.js のプログラム', () => {
     expect(sent).toEqual(['NOTIFY SSTP/1.1\r\nSender: test\r\n\r\n']);
   });
 
+  it('node main.js の main.js はファイルのパス。package.json の main が自分を指していても止まらず、失敗したモジュールはキャッシュしない', () => {
+    const f = new Map([
+      ['node_modules/loop/package.json', utf8(JSON.stringify({ name: 'loop', main: '.' }))],
+      ['node_modules/loop/index.js', utf8('module.exports = "loop";')],
+      ['bad.js', utf8('globalThis.__badCount = (globalThis.__badCount ?? 0) + 1; throw new Error("bad");')],
+      [
+        'main.js',
+        utf8(
+          [
+            'let first = "", second = "";',
+            "try { require('./bad'); } catch (e) { first = e.message; }",
+            "try { require('./bad'); } catch (e) { second = e.message; }",
+            "process.stdout.write([require('loop'), first, second, globalThis.__badCount].join(','));",
+          ].join('\n'),
+        ),
+      ],
+    ]);
+    let out = '';
+    startNode({ files: f, stdout: (t) => (out += t), stderr: () => {}, write: () => {}, sstp: async () => '' }, ['main.js']);
+    expect(out).toBe('loop,bad,bad,2');
+    delete (globalThis as { __badCount?: number }).__badCount;
+  });
+
   it('見つからないモジュールは Node と同じく MODULE_NOT_FOUND で投げる', () => {
     const f = new Map([['main.js', utf8("try { require('nothing'); } catch (e) { module.exports = e.code; }\nprocess.stdout.write(module.exports);")]]);
     let out = '';

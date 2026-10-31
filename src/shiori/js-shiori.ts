@@ -20,6 +20,7 @@ export class JsShiori extends WorkerShiori implements Shiori {
     private readonly node?: { argv: string[] },
   ) {
     super(hooks);
+    this.acceptsSstp = !!node;
   }
 
   async load(): Promise<void> {

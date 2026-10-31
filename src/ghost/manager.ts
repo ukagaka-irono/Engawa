@@ -142,7 +142,7 @@ export class GhostManager implements GhostEnv {
       current: () => this.current,
       installed: () => this.packages,
       log: (name, text) => this.logPlugin(name, text),
-      sstp: (request) => this.sstp(request, true),
+      sstp: (request, key) => this.sstpFromPackage(request, key),
     });
   }
 
@@ -610,6 +610,11 @@ export class GhostManager implements GhostEnv {
   /** SSTP の要求を処理する (local は同じページから) */
   sstp(request: string, local = true, origin = ''): Promise<string> {
     return handleSstp(request, this.sstpHost(), local, origin);
+  }
+
+  /** ゴースト・プラグインの SHIORI が送った SSTP。よそのページからのものと同じく制限する (クッキーはパッケージごと) */
+  sstpFromPackage(request: string, key: string): Promise<string> {
+    return handleSstp(request, this.sstpHost(), false, `package:${key}`, { fromPackage: true });
   }
 
   // ---------------------------------------------------------------- 起動

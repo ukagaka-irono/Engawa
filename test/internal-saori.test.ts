@@ -49,6 +49,19 @@ describe('MediaInfo (音声のタグと長さ)', () => {
   it('読めない形式は Result も値も空', () => {
     expect(mediaInfo(utf8('hello'), ['title', 'duration'])).toEqual({ result: '', values: ['', ''] });
   });
+
+  it('ファイルに書かれた大きさを信じて、ファイルの終わりを越えて読み続けない (壊れた WAV・Ogg)', () => {
+    // LIST の大きさが 4GB 近いと書かれた 44 バイトの WAV
+    const bad = Uint8Array.from([...chars('RIFF'), ...le32(36), ...chars('WAVE'), ...chars('LIST'), ...le32(0xfffffff0), ...chars('INFO'), ...new Array(16).fill(0)]);
+    const t0 = performance.now();
+    expect(mediaInfo(bad, ['title']).values).toEqual(['']);
+    expect(performance.now() - t0).toBeLessThan(1000);
+    // 区切りが 255 ばかりで終わらないパケットの Ogg (8MB)。1つのパケットは上限までしか写さない
+    const page = Uint8Array.from([...chars('OggS'), 0, 2, ...new Array(8).fill(0), ...le32(1), ...le32(0), ...le32(0), 255, ...new Array(255).fill(255)]);
+    const big = new Uint8Array(8 * 1024 * 1024);
+    for (let p = 0; p + page.length + 255 * 255 <= big.length; p += page.length + 255 * 255) big.set(page, p);
+    expect(mediaInfo(big, ['title']).values).toEqual(['']);
+  });
 });
 
 describe('SAORI over DirectSSTP (internal_file)', () => {

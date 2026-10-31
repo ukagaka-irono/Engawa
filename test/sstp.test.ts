@@ -122,4 +122,24 @@ describe('SSTP', () => {
     expect(await handleSstp(req('SEND SSTP/1.4', 'Script: x'), host([a.ghost]), true)).toContain('400');
     expect(await handleSstp(req('SEND SSTP/3.0', 'Sender: x', 'Script: x'), host([a.ghost]), true)).toContain('505');
   });
+
+  it('途方もない Reference の番号は読まない (ページを止めない)', async () => {
+    const a = fakeGhost('A', 'あ', 'い');
+    const t0 = performance.now();
+    await handleSstp(req('NOTIFY SSTP/1.1', 'Sender: x', 'Event: OnTest', 'Reference0: 0', 'Reference4294967294: x'), host([a.ghost]), true);
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(a.requests[0].refs).toEqual(['0']);
+  });
+
+  it('ゴースト・プラグインの SHIORI が送ったものは、よそからのものと同じく制限する (ID を付けても外さない)', async () => {
+    const a = fakeGhost('A', 'あ', 'い');
+    const send = (...lines: string[]) => handleSstp(req(...lines), host([a.ghost], { refused: true }), false, 'package:plugin/x', { fromPackage: true });
+    // 「よそからの SSTP を受けない」の設定には関係なく受ける
+    expect(await send('SEND SSTP/1.4', 'Sender: x', 'ID: id-A', 'Option: nodescript', 'SecurityLevel: local', 'Script: \\![vanishbymyself]')).toContain('200');
+    expect(a.played[0].kinds).toContain('remote');
+    expect(a.played[0].kinds).not.toContain('owned');
+    // nodescript で送り主を隠せない
+    expect(a.played[0].sender).toBe('x');
+    expect(await send('EXECUTE SSTP/1.1', 'Sender: x', 'Command: SetProperty[currentghost.scope(0).surface.num,5]')).toContain('420');
+  });
 });

@@ -120,7 +120,12 @@ function pickExport(e: unknown): string | undefined {
     return undefined;
   }
   if (e && typeof e === 'object') {
-    for (const [k, v] of Object.entries(e)) if (CONDITIONS.has(k)) return pickExport(v);
+    // 当てはまる条件の中身から選べなければ、次の条件を見る (Node と同じ)
+    for (const [k, v] of Object.entries(e)) {
+      if (!CONDITIONS.has(k)) continue;
+      const r = pickExport(v);
+      if (r) return r;
+    }
   }
   return undefined;
 }
@@ -133,7 +138,7 @@ interface Module {
 }
 
 /** プログラムを始める。stdin に書くと、プログラムの process.stdin に届く */
-export function startNode(host: NodeHost, argv: string[], opts: { globals?: boolean } = {}): { stdin(text: string): void; exited(): boolean } {
+export function startNode(host: NodeHost, argv: string[], opts: { globals?: boolean } = {}): { stdin(text: string): void; exited(): boolean; exit(): void } {
   const key = (p: string) => p.replace(/^\/+/, '').toLowerCase().normalize('NFC');
   const setImmediate = (fn: (...a: unknown[]) => void, ...a: unknown[]) => setTimeout(() => fn(...a), 0);
   const clearImmediate = (t: number) => clearTimeout(t);
@@ -141,8 +146,16 @@ export function startNode(host: NodeHost, argv: string[], opts: { globals?: bool
   const realFetch = globalThis.fetch.bind(globalThis);
   const nodeFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? String(input) : input.url, 'http://localhost/');
-    if (/^(localhost|127\.0\.0\.1)$/.test(url.hostname) && url.port === '9801') {
-      const body = typeof init?.body === 'string' ? init.body : '';
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(url.hostname) && url.port === '9801') {
+      const raw = init?.body ?? (input instanceof Request ? await input.text() : undefined);
+      const body =
+        typeof raw === 'string'
+          ? raw
+          : raw instanceof URLSearchParams
+            ? raw.toString()
+            : raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)
+              ? new TextDecoder().decode(raw as ArrayBuffer)
+              : '';
       return new Response(await host.sstp(body.replace(/\r?\n/g, '\r\n')), { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     }
     return realFetch(input, init);
@@ -245,15 +258,21 @@ export function startNode(host: NodeHost, argv: string[], opts: { globals?: bool
     timers: { setTimeout, clearTimeout, setInterval, clearInterval },
   };
 
-  /** ファイル・ディレクトリ (index.js・package.json) を探す */
-  const asFile = (p: string): string | undefined => {
+  /** ファイル・ディレクトリ (index.js・package.json) を探す。seen は package.json の main がたどり着く先の輪を止める */
+  const asFile = (p: string, seen = new Set<string>()): string | undefined => {
     for (const c of [p, `${p}.js`, `${p}.cjs`, `${p}.json`]) if (has(c)) return c;
-    if (has(`${p}/package.json`)) {
-      const pkg = JSON.parse(text(`${p}/package.json`)) as { main?: string; exports?: unknown };
+    if (has(`${p}/package.json`) && !seen.has(key(p))) {
+      seen.add(key(p));
+      let pkg: { main?: string; exports?: unknown } = {};
+      try {
+        pkg = JSON.parse(text(`${p}/package.json`)) as typeof pkg;
+      } catch {
+        // 読めない package.json は無いものとして、index.js を探す
+      }
       const ex = pkg.exports && typeof pkg.exports === 'object' && '.' in pkg.exports ? (pkg.exports as Record<string, unknown>)['.'] : pkg.exports;
       const main = pickExport(ex) ?? pkg.main;
       if (main) {
-        const r = asFile(pathModule.join(p, main));
+        const r = asFile(pathModule.join(p, main), seen);
         if (r) return r;
       }
     }
@@ -279,19 +298,27 @@ export function startNode(host: NodeHost, argv: string[], opts: { globals?: bool
   };
 
   const load = (file: string): unknown => {
-    const cached = cache.get(file);
+    // ファイルは大文字・小文字を区別しないので、キャッシュも同じ見方で引く
+    const id = key(file);
+    const cached = cache.get(id);
     if (cached) return cached.exports;
     const mod: Module = { exports: {}, id: file, filename: file, loaded: false };
-    cache.set(file, mod);
-    if (file.endsWith('.json')) {
-      mod.exports = JSON.parse(text(file));
-    } else {
-      const dir = pathModule.dirname(file);
-      const req = Object.assign((spec: string) => requireFrom(spec, dir), { resolve: (spec: string) => resolve(spec, dir) ?? spec, cache: {} });
-      const code = text(file).replace(/^#!.*/, '');
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      const fn = new Function('exports', 'require', 'module', '__filename', '__dirname', 'process', 'global', 'fetch', 'setImmediate', 'clearImmediate', `${code}\n//# sourceURL=engawa-node:${file}`);
-      fn.call(mod.exports, mod.exports, req, mod, file, dir, proc, globalThis, nodeFetch, setImmediate, clearImmediate);
+    cache.set(id, mod);
+    try {
+      if (file.endsWith('.json')) {
+        mod.exports = JSON.parse(text(file));
+      } else {
+        const dir = pathModule.dirname(file);
+        const req = Object.assign((spec: string) => requireFrom(spec, dir), { resolve: (spec: string) => resolve(spec, dir) ?? spec, cache: {} });
+        const code = text(file).replace(/^#!.*/, '');
+        // eslint-disable-next-line @typescript-eslint/no-implied-eval
+        const fn = new Function('exports', 'require', 'module', '__filename', '__dirname', 'process', 'global', 'fetch', 'setImmediate', 'clearImmediate', `${code}\n//# sourceURL=engawa-node:${file}`);
+        fn.call(mod.exports, mod.exports, req, mod, file, dir, proc, globalThis, nodeFetch, setImmediate, clearImmediate);
+      }
+    } catch (e) {
+      // 読み込みに失敗したモジュールは、Node と同じくキャッシュに残さない
+      cache.delete(id);
+      throw e;
     }
     mod.loaded = true;
     return mod.exports;
@@ -299,7 +326,7 @@ export function startNode(host: NodeHost, argv: string[], opts: { globals?: bool
 
   const requireFrom = (spec: string, fromDir: string): unknown => {
     const name = spec.replace(/^node:/, '');
-    if (name in builtins) return builtins[name];
+    if (Object.prototype.hasOwnProperty.call(builtins, name)) return builtins[name];
     const file = resolve(spec, fromDir);
     if (!file) throw Object.assign(new Error(`Cannot find module '${spec}'`), { code: 'MODULE_NOT_FOUND' });
     return load(file);
@@ -315,9 +342,18 @@ export function startNode(host: NodeHost, argv: string[], opts: { globals?: bool
     globalThis.fetch = nodeFetch;
   }
 
-  requireFrom(argv[0], '/');
+  // node の引数のスクリプトは、node_modules の名前ではなく、いつもファイルのパス (node main.js も ./main.js と同じ)
+  const entry = asFile(pathModule.resolve('/', argv[0]));
+  if (!entry) throw Object.assign(new Error(`Cannot find module '${argv[0]}'`), { code: 'MODULE_NOT_FOUND' });
+  load(entry);
   return {
     stdin: (t) => stdin.emit('data', t),
     exited: () => exited,
+    exit: () => {
+      if (exited) return;
+      exited = true;
+      proc.emit('beforeExit', 0);
+      proc.emit('exit', 0);
+    },
   };
 }

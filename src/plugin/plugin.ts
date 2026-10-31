@@ -8,6 +8,9 @@ import { FileTree, normalizePath } from '../vfs/files';
 import type { PackageMeta } from '../vfs/storage';
 import { buildPluginRequest, parsePluginResponse, type PluginRequest, type PluginResponse } from './protocol';
 
+/** 続けてこれだけ失敗したら、そのプラグインを止める */
+const MAX_FAILURES = 3;
+
 export interface PluginHooks {
   /** プラグインがファイルを書いた (パスはプラグインのフォルダからの相対) */
   onWrite(path: string, data: Uint8Array): void;
@@ -38,6 +41,10 @@ export class Plugin {
   runnable = false;
   /** 読み込めなかった理由 */
   failed?: string;
+  /** 送ってまだ答えの無い要求の数 */
+  pending = 0;
+  /** 続けて失敗した (時間切れなど) 数 */
+  private failures = 0;
   private shiori?: Shiori;
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -102,13 +109,22 @@ export class Plugin {
     const run = async (): Promise<PluginResponse | undefined> => {
       if (!this.shiori) return undefined;
       try {
-        return parsePluginResponse(await this.shiori.request(buildPluginRequest(req)));
+        const res = parsePluginResponse(await this.shiori.request(buildPluginRequest(req)));
+        this.failures = 0;
+        return res;
       } catch (e) {
         this.hooks.onLog(`${req.id}: ${(e as Error).message}`);
+        // 時間切れが続くなら止める (止まったプラグインに、要求を送り続けないように)
+        if (++this.failures >= MAX_FAILURES) {
+          this.failed = '続けて答えなかったので止めました';
+          this.hooks.onLog(this.failed);
+          void this.unload();
+        }
         return undefined;
       }
     };
-    const p = this.queue.then(run, run);
+    this.pending++;
+    const p = this.queue.then(run, run).finally(() => this.pending--);
     this.queue = p.catch(() => undefined);
     return p;
   }

@@ -13,8 +13,8 @@ export interface PluginEnv {
   installed(): PackageMeta[];
   /** エラーログ (プラグインの名前で) */
   log(name: string, text: string): void;
-  /** プラグインが送った SSTP を受ける */
-  sstp(request: string): Promise<string>;
+  /** プラグインが送った SSTP を受ける (key はプラグインのパッケージ) */
+  sstp(request: string, key: string): Promise<string>;
 }
 
 /** ゴーストの側から呼ぶもの (GhostEnv.plugins) */
@@ -55,8 +55,12 @@ function ghostRefs(g: Ghost): Reference[] {
  */
 export class PluginHost implements PluginBridge {
   private plugins: Plugin[] = [];
+  /** 最初の NOTIFY を送り終えて、イベントを送ってよいもの */
+  private readonly ready = new Set<Plugin>();
   /** OnSecondChange までの残り秒 */
   private readonly countdown = new Map<Plugin, number>();
+  /** sync を1つずつ順に行う (重なると同じプラグインを2回読み込む) */
+  private syncing: Promise<void> = Promise.resolve();
 
   constructor(private readonly env: PluginEnv) {}
 
@@ -75,11 +79,19 @@ export class PluginHost implements PluginBridge {
   }
 
   /** インストール済みの一覧に合わせる (増えたものを読み込み、消えたもの・入れ直したものを閉じる) */
-  async sync(packages: PackageMeta[]): Promise<void> {
+  sync(packages: PackageMeta[]): Promise<void> {
+    const run = () => this.syncNow(packages);
+    this.syncing = this.syncing.then(run, run);
+    return this.syncing;
+  }
+
+  private async syncNow(packages: PackageMeta[]): Promise<void> {
     const metas = packages.filter((p) => p.kind === 'plugin');
     for (const p of [...this.plugins]) {
       if (metas.some((m) => m.key === p.key && m.installedAt === p.meta.installedAt)) continue;
+      // 一覧から先に外す (閉じるときに書き戻すセーブデータは、消したパッケージに書かない)
       this.plugins.splice(this.plugins.indexOf(p), 1);
+      this.ready.delete(p);
       this.countdown.delete(p);
       await p.unload();
     }
@@ -92,15 +104,24 @@ export class PluginHost implements PluginBridge {
         this.env.log(m.name, `プラグインを読めませんでした: ${(e as Error).message}`);
         continue;
       }
-      const plugin = new Plugin(m, files, {
-        onWrite: (path, data) => void writePackageFile(m.key, path, data).catch((e) => console.warn('[plugin save]', e)),
+      // 読んでいる間に消された・入れ直されたなら読み込まない
+      if (!this.env.installed().some((x) => x.key === m.key && x.installedAt === m.installedAt)) continue;
+      const plugin: Plugin = new Plugin(m, files, {
+        onWrite: (path, data) => this.save(plugin, path, data),
         onLog: (text) => this.env.log(plugin.name, text),
         onSaori: (effect) => this.onSaori(plugin, effect),
-        onSstp: (request) => this.env.sstp(request),
+        onSstp: (request) => this.env.sstp(request, m.key),
       });
       this.plugins.push(plugin);
       void this.start(plugin);
     }
+  }
+
+  /** プラグインが書いたファイルを保存する (もう一覧に無いもの (消したもの) のは捨てる) */
+  private save(plugin: Plugin, path: string, data: Uint8Array): void {
+    if (!this.plugins.includes(plugin)) return;
+    plugin.files.set(path, data);
+    void writePackageFile(plugin.key, path, data).catch((e) => console.warn('[plugin save]', e));
   }
 
   /** 読み込んで、最初の NOTIFY と、起動中のゴーストの OnGhostBoot を送る */
@@ -124,15 +145,11 @@ export class PluginHost implements PluginBridge {
     await notify('balloonpathlist', ['/balloon/']);
     await notify('headlinepathlist', ['/headline/']);
     await notify('pluginpathlist', ['/plugin/']);
+    if (!this.plugins.includes(plugin)) return;
     this.countdown.set(plugin, plugin.secondInterval);
+    // ここからは本体のイベントも送る (起動中のゴーストの OnGhostBoot は、ここで送る)
+    this.ready.add(plugin);
     for (const g of this.alive()) await this.send(plugin, 'GET', 'OnGhostBoot', ghostRefs(g), g);
-  }
-
-  async unloadAll(): Promise<void> {
-    const list = this.plugins;
-    this.plugins = [];
-    this.countdown.clear();
-    await Promise.all(list.map((p) => p.unload()));
   }
 
   // ---------------------------------------------------------------- 本体からのイベント
@@ -163,7 +180,8 @@ export class PluginHost implements PluginBridge {
   /** 1秒ごと (secondchangeinterval ごとに OnSecondChange) */
   second(): void {
     for (const p of this.runnable()) {
-      if (!p.secondInterval) continue;
+      // 前の要求にまだ答えていなければ送らない (遅いプラグインに要求がたまり続けないように)
+      if (!p.secondInterval || p.pending > 0) continue;
       const left = (this.countdown.get(p) ?? p.secondInterval) - 1;
       if (left > 0) {
         this.countdown.set(p, left);
@@ -178,7 +196,7 @@ export class PluginHost implements PluginBridge {
 
   async call(from: Ghost, target: string, method: PluginMethod, event: string, refs: Reference[]): Promise<string | undefined> {
     const plugin = this.find(target);
-    if (!plugin || !plugin.runnable) return 'notfound';
+    if (!plugin || !this.runnable().includes(plugin)) return 'notfound';
     const res = await plugin.request({ method, id: event, references: refs, sender: from.name });
     if (!res) return 'notfound';
     // NOTIFY の 204 は普通の答え。GET で何も返さなかったら失敗として知らせる (SSP と同じく実行結果の番号)
@@ -188,7 +206,7 @@ export class PluginHost implements PluginBridge {
   }
 
   async forward(from: Ghost, pluginId: string, method: PluginMethod, events: [string, Reference[]][]): Promise<boolean> {
-    const plugin = this.plugins.find((p) => p.id === pluginId && p.runnable);
+    const plugin = this.runnable().find((p) => p.id === pluginId);
     if (!plugin) return false;
     for (const [id, refs] of events) {
       const res = await plugin.request({ method, id, references: refs });
@@ -202,7 +220,8 @@ export class PluginHost implements PluginBridge {
 
   talked(from: Ghost, when: 'before' | 'after', refs: Reference[], source?: string): void {
     // 自分が出したスクリプトのことは知らせない (知らせると、答えたスクリプトでまた呼ばれ続ける)
-    for (const p of this.runnable()) if (p.otherGhostTalk === when && p.id !== source) void this.send(p, 'GET', 'OnOtherGhostTalk', refs, from);
+    // 答えたスクリプトを話しても、また OnOtherGhostTalk を送らない (2つのプラグインが答え合って止まらなくなる)
+    for (const p of this.runnable()) if (p.otherGhostTalk === when && p.id !== source) void this.send(p, 'GET', 'OnOtherGhostTalk', refs, from, true);
   }
 
   // ---------------------------------------------------------------- 送る・届ける
@@ -212,22 +231,23 @@ export class PluginHost implements PluginBridge {
   }
 
   private runnable(): Plugin[] {
-    return this.plugins.filter((p) => p.runnable);
+    return this.plugins.filter((p) => p.runnable && this.ready.has(p));
   }
 
-  private async send(plugin: Plugin, method: PluginMethod, id: string, refs: Reference[], caller?: Ghost): Promise<void> {
+  /** answersTalk なら、OnOtherGhostTalk への答え (話しても OnOtherGhostTalk を送らない) */
+  private async send(plugin: Plugin, method: PluginMethod, id: string, refs: Reference[], caller?: Ghost, answersTalk = false): Promise<void> {
     const res = await plugin.request({ method, id, references: refs });
     // NOTIFY の答えのスクリプトは使わない (ukadoc の PLUGIN Event)
-    if (res && method === 'GET') await this.deliver(plugin, res, caller);
+    if (res && method === 'GET') await this.deliver(plugin, res, caller, answersTalk);
   }
 
   /**
    * 答えの Event・Script をゴーストに届ける。宛先は Target (無ければ呼んだゴースト、それも無ければ選択中のゴースト)。
    * Event にゴーストが答えれば、その答えを再生する。答えなければ既定のスクリプト (Script) を再生する
    */
-  private async deliver(plugin: Plugin, res: PluginResponse, caller?: Ghost): Promise<void> {
+  private async deliver(plugin: Plugin, res: PluginResponse, caller?: Ghost, answersTalk = false): Promise<void> {
     if (res.status !== 200 || (!res.event && !res.script)) return;
-    await Promise.all(this.targets(res.target, caller).map((g) => this.deliverTo(plugin, res, g)));
+    await Promise.all(this.targets(res.target, caller).map((g) => this.deliverTo(plugin, res, g, answersTalk)));
   }
 
   private targets(target: string | undefined, caller?: Ghost): Ghost[] {
@@ -242,32 +262,31 @@ export class PluginHost implements PluginBridge {
     return one ? [one] : [];
   }
 
-  private async deliverTo(plugin: Plugin, res: PluginResponse, g: Ghost): Promise<void> {
+  private async deliverTo(plugin: Plugin, res: PluginResponse, g: Ghost, answersTalk: boolean): Promise<void> {
     // Marker はバルーンの SSTP の表示のところに出す (SHIORI の応答の Marker と同じ)
     const marker = res.headers.get('marker') || undefined;
     if (res.event) {
       const notify = res.eventOption.includes('notify');
       const value = await g.request(notify ? 'NOTIFY' : 'GET', res.event, res.references);
       if (value && !notify && g.alive && !g.leaving) {
-        void g.playScript(value, { event: res.event, refs: res.references, kinds: ['plugin-event'], plugin: plugin.id, sstpSender: marker });
+        void g.playScript(value, { event: res.event, refs: res.references, kinds: ['plugin-event'], plugin: plugin.id, sstpSender: marker, answersTalk });
         return;
       }
     }
     if (!res.script) return;
     if (res.scriptOption.includes('nobreak') && !(await idle(g))) return;
     if (!g.alive || g.leaving) return;
-    void g.playScript(res.script, { kinds: ['plugin-script'], noTranslate: res.scriptOption.includes('notranslate'), plugin: plugin.id, sstpSender: marker });
+    void g.playScript(res.script, { kinds: ['plugin-script'], noTranslate: res.scriptOption.includes('notranslate'), plugin: plugin.id, sstpSender: marker, answersTalk });
   }
 
   /** プラグインの SAORI に頼まれたこと (Worker からは触れないもの) */
   private onSaori(plugin: Plugin, effect: SaoriEffect): void {
     if (effect.kind === 'clipboard') void copyText(effect.text);
-    else if (effect.kind === 'write') {
-      // パスはプラグインのフォルダを ghost/master に置いた形で来る
-      const rel = effect.path.replace(/^ghost\/master\//, '');
-      plugin.files.set(rel, effect.data);
-      void writePackageFile(plugin.key, rel, effect.data).catch((e) => console.warn('[plugin save]', e));
-    } else if (effect.kind === 'speak' && typeof speechSynthesis !== 'undefined') {
+    // パスはプラグインのフォルダを ghost/master に置いた形で来る
+    else if (effect.kind === 'write') this.save(plugin, effect.path.replace(/^ghost\/master\//, ''), effect.data);
+    // SAORI が知らせるイベント (httpc の OnHttpcNotify など) は、そのプラグインに送る
+    else if (effect.kind === 'event') void this.send(plugin, 'GET', effect.id, effect.refs);
+    else if (effect.kind === 'speak' && typeof speechSynthesis !== 'undefined') {
       if (effect.stop) speechSynthesis.cancel();
       else if (effect.text) speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(effect.text), { lang: 'ja-JP' }));
     } else this.env.log(plugin.name, `プラグインの SAORI の ${effect.kind} は使えません`);

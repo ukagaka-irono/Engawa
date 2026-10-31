@@ -46,3 +46,12 @@ describe('PLUGIN/2.0', () => {
     expect(parsePluginResponse('garbage').status).toBe(500);
   });
 });
+
+describe('PLUGIN/2.0 の応答の上限', () => {
+  it('途方もない Reference の番号は読まない (ページを止めない)', () => {
+    const t0 = performance.now();
+    const res = parsePluginResponse('PLUGIN/2.0 200 OK\r\nReference0: a\r\nReference4294967294: x\r\n\r\n');
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(res.references).toEqual(['a']);
+  });
+});

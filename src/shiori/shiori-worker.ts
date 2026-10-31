@@ -85,26 +85,45 @@ const host = {
 const sstpWaiting = new Map<number, (response: string) => void>();
 let sstpSeq = 0;
 
+/** Node.js のプログラムの答えを待つ長さ (メインスレッドの SHIORI の待ち時間と同じ) */
+const NODE_REQUEST_TIMEOUT_MS = 10_000;
+
 /**
  * SHIOLINK で動かす Node.js のプログラムを、SHIORI と同じ形にする。
- * 要求は「*S:番号」の後に送り、プログラムが「*S:番号」を返した後の、空行までを応答とする
+ * 要求は1つずつ「*S:番号」の後に送り、プログラムが「*S:番号」を返した後の、空行までを応答とする。
+ * 待っていない番号の答え (時間切れの後に来たものなど) は捨てる
  */
 function nodeShiori(argv: string[]): ShioriModule {
-  let pending: { echo: string; buf: string; resolve(text: string): void } | undefined;
+  let out = '';
+  let current: { id: string; resolve(text: string): void } | undefined;
+  const drain = () => {
+    for (;;) {
+      const start = out.indexOf('*S:');
+      if (start < 0) {
+        // 「*S:」の途中で切れているかもしれないところだけ残す
+        out = out.endsWith('*S') ? '*S' : out.endsWith('*') ? '*' : '';
+        return;
+      }
+      out = out.slice(start);
+      const head = /^\*S:([^\r\n]*)\r\n/.exec(out);
+      if (!head) return;
+      const rest = out.slice(head[0].length);
+      const end = rest.indexOf('\r\n\r\n');
+      if (end < 0) return;
+      out = rest.slice(end + 4);
+      if (current?.id === head[1]) {
+        const done = current;
+        current = undefined;
+        done.resolve(rest.slice(0, end + 4));
+      }
+    }
+  };
   const node = startNode(
     {
       files,
       stdout: (t) => {
-        if (!pending) return;
-        pending.buf += t;
-        let b = pending.buf;
-        if (b.startsWith(pending.echo)) b = b.slice(pending.echo.length);
-        else if (pending.echo.startsWith(b)) return;
-        const end = b.indexOf('\r\n\r\n');
-        if (end < 0) return;
-        const done = pending;
-        pending = undefined;
-        done.resolve(b.slice(0, end + 4));
+        out += t;
+        drain();
       },
       stderr: (t) => ctx.postMessage({ type: 'log', message: t.trimEnd() }),
       write: (path, data) => ctx.postMessage({ type: 'write', path, data }),
@@ -119,19 +138,37 @@ function nodeShiori(argv: string[]): ShioriModule {
     { globals: true },
   );
   let seq = 0;
+  let chain: Promise<unknown> = Promise.resolve();
   return {
     load(dir) {
       node.stdin(`*L:/${dir}\r\n`);
     },
     request(text) {
-      const id = `${++seq}`;
-      return new Promise((resolve) => {
-        pending = { echo: `*S:${id}\r\n`, buf: '', resolve };
-        node.stdin(`*S:${id}\r\n${text.endsWith('\r\n\r\n') ? text : `${text.replace(/(\r\n)*$/, '')}\r\n\r\n`}`);
-      });
+      const run = () =>
+        new Promise<string>((resolve) => {
+          const id = `${++seq}`;
+          const timer = setTimeout(() => {
+            if (current?.id !== id) return;
+            current = undefined;
+            resolve('');
+          }, NODE_REQUEST_TIMEOUT_MS);
+          current = {
+            id,
+            resolve: (t) => {
+              clearTimeout(timer);
+              resolve(t);
+            },
+          };
+          node.stdin(`*S:${id}\r\n${text.endsWith('\r\n\r\n') ? text : `${text.replace(/(\r\n)*$/, '')}\r\n\r\n`}`);
+        });
+      // SHIOLINK は1つずつ (前の答えが来るか、時間切れになってから次を送る)
+      const p = chain.then(run, run);
+      chain = p.catch(() => undefined);
+      return p;
     },
     unload() {
       node.stdin('*U:\r\n');
+      node.exit();
     },
   };
 }

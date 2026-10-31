@@ -64,12 +64,18 @@ function header(req: SstpRequest, name: string): string | undefined {
   return req.headers.find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1];
 }
 
+/**
+ * Reference の番号の上限。よそのページから Reference4294967294 のような番号を送られても、
+ * 途方もない長さの配列を作ってページを止めないように
+ */
+export const MAX_REFERENCES = 256;
+
 /** Reference0… を番号順に */
 function references(req: SstpRequest): Reference[] {
   const refs: Reference[] = [];
   for (const [k, v] of req.headers) {
     const m = /^Reference(\d+)$/i.exec(k);
-    if (m) refs[Number(m[1])] = v;
+    if (m && Number(m[1]) < MAX_REFERENCES) refs[Number(m[1])] = v;
   }
   return Array.from(refs, (r) => r ?? '');
 }
@@ -121,18 +127,21 @@ async function idle(g: Ghost, ms = 30_000): Promise<boolean> {
 
 /**
  * SSTP の要求を処理して応答を返す。local は同じページから (window.engawa.sstp)。
- * origin はよそのページから postMessage で送られたときの送り元 (SSTP のクッキーを送り元ごとに分ける)
+ * origin はよそのページから postMessage で送られたときの送り元 (SSTP のクッキーを送り元ごとに分ける)。
+ * fromPackage は、ゴースト・プラグインの SHIORI が送ったもの (SHIOLINK の Node.js のプログラムの SSTP over HTTP)。
+ * 中身は信頼できないので、よそのページからのものと同じく制限する。ただし利用者の「よそからの SSTP を受けない」は関係なく、
+ * ID (Owned SSTP) を付けても制限は外さない (プラグインはゴーストの ID をイベントで受け取っている)
  */
-export async function handleSstp(text: string, host: SstpHost, local: boolean, origin = ''): Promise<string> {
+export async function handleSstp(text: string, host: SstpHost, local: boolean, origin = '', opts: { fromPackage?: boolean } = {}): Promise<string> {
   const req = parseSstp(text);
   if (!req) return response(400);
   const v = Number(req.version);
   if (!(v >= 1 && v < 3)) return response(505);
   const sender = header(req, 'Sender') ?? header(req, 'User-Agent');
   if (!sender && req.method !== 'EXECUTE') return response(400);
-  if (host.refused() && !local) return response(420);
+  if (host.refused() && !local && !opts.fromPackage) return response(420);
   const options = (header(req, 'Option') ?? '').toLowerCase().split(',').map((s) => s.trim());
-  const owned = !!header(req, 'ID');
+  const owned = !!header(req, 'ID') && !opts.fromPackage;
   const kinds = [req.method === 'COMMUNICATE' ? 'communicate' : 'sstp-send', ...(owned ? ['owned'] : []), ...(local || owned ? [] : ['remote'])];
   const securityLevel = local || owned ? (header(req, 'SecurityLevel') ?? 'local') : 'external';
 

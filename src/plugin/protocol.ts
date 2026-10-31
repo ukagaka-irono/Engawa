@@ -7,6 +7,9 @@ import type { Reference } from '../shiori/protocol';
 
 export type PluginMethod = 'GET' | 'NOTIFY';
 
+/** 応答の Reference の番号の上限 */
+const MAX_REFERENCES = 256;
+
 export interface PluginRequest {
   method: PluginMethod;
   id: string;
@@ -65,8 +68,10 @@ export function parsePluginResponse(text: string): PluginResponse {
     const key = line.slice(0, i).trim();
     const value = line.slice(i + 1).replace(/^ /, '');
     const r = /^Reference(\d+)$/i.exec(key);
-    if (r) refs[Number(r[1])] = value;
-    else headers.set(key.toLowerCase(), value);
+    // 番号はプラグインが書いたもの。途方もない番号で長い配列を作らない (ページが止まる)
+    if (r) {
+      if (Number(r[1]) < MAX_REFERENCES) refs[Number(r[1])] = value;
+    } else headers.set(key.toLowerCase(), value);
   }
   const nonEmpty = (k: string) => {
     const v = headers.get(k);

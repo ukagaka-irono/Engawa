@@ -52,7 +52,8 @@ export function parseSaoriRequest(bytes: Uint8Array): SaoriRequest {
     const value = line.slice(colon + 1).replace(/^ /, '');
     headers.set(name.toLowerCase(), value);
     const m = /^Argument(\d+)$/i.exec(name);
-    if (m) args[Number(m[1])] = value;
+    // 途方もない番号で、長い配列を作らない
+    if (m && Number(m[1]) < 256) args[Number(m[1])] = value;
   }
   // 抜けた番号は空文字列にする
   for (let i = 0; i < args.length; i++) args[i] ??= '';

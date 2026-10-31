@@ -16,6 +16,9 @@ interface Fetched {
   error?: string;
 }
 
+/** SAORI が同期で取るときに待つ長さ */
+const FETCH_TIMEOUT_MS = 30_000;
+
 /** 同期で取る。XMLHttpRequest の無いところ (テストなど) では失敗する */
 export function fetchSync(url: string, method = 'GET', body?: string): Fetched {
   if (typeof XMLHttpRequest === 'undefined') return { ok: false, status: 0, error: 'XMLHttpRequest がありません' };
@@ -28,6 +31,8 @@ export function fetchSync(url: string, method = 'GET', body?: string): Fetched {
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, false);
     xhr.responseType = 'arraybuffer';
+    // 同期なので、応答の遅いサーバーで SHIORI の Worker が止まり続けないように (Worker の中では同期でも効く)
+    xhr.timeout = FETCH_TIMEOUT_MS;
     xhr.send(body ?? null);
     const charset = /charset=([\w-]+)/i.exec(xhr.getResponseHeader('Content-Type') ?? '')?.[1];
     const data = xhr.response instanceof ArrayBuffer ? new Uint8Array(xhr.response) : undefined;
@@ -189,12 +194,19 @@ export function httpc(ctx: SaoriContext): JsSaori {
       const res = fetchSync(args[0]);
       if (!res.ok || !res.data) return { result: '0', values: [] };
       const path = normalizePath(args[1], ctx.dir);
-      ctx.fs.writeFile(path, res.data);
+      try {
+        ctx.fs.writeFile(path, res.data);
+      } catch {
+        // フォルダが無い・フォルダの名前だったなど
+        return { result: '0', values: [] };
+      }
       ctx.post({ kind: 'write', path: path.slice(1), data: res.data.slice() });
       return { result: '1', values: [] };
     }
     let data = get(args[0], opts);
     if (data === undefined) return { result: '', values: [] };
+    // 前も後も空だと同じところを取り続けて止まらない (元の httpc も同じ) ので、何も取らない
+    if (!args[1] && !args[2]) return { result: '', values: [] };
     const found: string[] = [];
     for (;;) {
       const s = data.indexOf(args[1]);

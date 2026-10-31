@@ -3,6 +3,8 @@ import type { ShioriHooks } from './shiori';
 
 export const REQUEST_TIMEOUT_MS = 10_000;
 export const UNLOAD_TIMEOUT_MS = 3_000;
+/** Worker から送られる SSTP の要求の長さの上限 (SSP の Direct SSTP と同じく 1MB) */
+const MAX_SSTP_LENGTH = 1024 * 1024;
 
 type Pending = { resolve(v: unknown): void; reject(e: Error): void; timer: number };
 
@@ -27,6 +29,8 @@ export type WorkerReply =
 export abstract class WorkerShiori {
   private worker?: Worker;
   private seq = 0;
+  /** Worker からの SSTP を受けるか (SHIOLINK の Node.js のプログラムだけ) */
+  protected acceptsSstp = false;
   private readonly pending = new Map<number, Pending>();
 
   constructor(protected readonly hooks: ShioriHooks) {}
@@ -100,10 +104,12 @@ export abstract class WorkerShiori {
       return;
     }
     if (msg.type === 'sstp') {
+      // SSTP を送れるのは SHIOLINK の Node.js のプログラムだけ (ふつうの SHIORI の Worker からは受けない)
       const worker = this.worker;
-      void (this.hooks.onSstp?.(msg.request) ?? Promise.resolve('SSTP/1.4 501 Not Implemented\r\n\r\n')).then((response) =>
-        worker?.postMessage({ type: 'sstp-response', id: msg.id, response }),
-      );
+      const send = this.acceptsSstp && typeof msg.request === 'string' && msg.request.length <= MAX_SSTP_LENGTH ? this.hooks.onSstp : undefined;
+      void (send?.(msg.request) ?? Promise.resolve('SSTP/1.4 501 Not Implemented\r\n\r\n'))
+        .catch(() => 'SSTP/1.4 500 Internal Server Error\r\n\r\n')
+        .then((response) => worker?.postMessage({ type: 'sstp-response', id: msg.id, response }));
       return;
     }
     const p = this.pending.get(msg.id);

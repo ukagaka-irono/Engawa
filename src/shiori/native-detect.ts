@@ -106,12 +106,12 @@ export function detectNativeEngine(dllName: string, files: FileTree): NativeEngi
   // (灯のプラグインが YAYA as SAORI の yaya.txt を持っているときに、YAYA として動かしてしまわないように)
   if (OTHER_ENGINES.includes(name.replace(/^.*[\\/]/, ''))) return undefined;
   const dll = files.get(`ghost/master/${dllName}`);
-  const rule =
+  const byDll =
     (dll &&
       (RULES.find((r) => r.signatures.some((s) => containsText(dll, s))) ??
         RULES.find((r) => r.wideSignatures?.some((s) => containsWideText(dll, s))))) ||
-    RULES.find((r) => r.dllNames.includes(name)) ||
-    RULES.find((r) => r.markers.some((m) => files.has(`ghost/master/${m}`)));
-  // 同梱の DLL が古い版なら、その版のビルドで動かす
-  return (rule && dll && rule.older?.(dll)) || rule;
+    RULES.find((r) => r.dllNames.includes(name));
+  // 同梱の DLL が古い版なら、その版のビルドで動かす (設定ファイルで決めたときは、DLL がその SHIORI のものか分からないので見ない)
+  if (byDll) return (dll && byDll.older?.(dll)) || byDll;
+  return RULES.find((r) => r.markers.some((m) => files.has(`ghost/master/${m}`)));
 }

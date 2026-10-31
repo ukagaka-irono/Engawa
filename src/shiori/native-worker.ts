@@ -87,7 +87,18 @@ async function load(msg: Extract<ToNative, { type: 'load' }>): Promise<void> {
   const prepared = await prepareWasmSaori(msg.saori, msg.files, { fs: m.FS, root: ROOT, post, log });
   saori = new SaoriHost(m.FS, ROOT, saoriResolver({ fs: m.FS, env: () => env, post, log, prepared }), log);
   // Direct SSTP (SAORI over DirectSSTP) は、Engawa の内蔵モジュール (src/saori/internal.ts) が答える
-  m.engawaSaori = { ...saori.bridge, directSstp: (req) => internalSaori(req, { fs: m.FS, root: ROOT, post }) ?? null };
+  m.engawaSaori = {
+    ...saori.bridge,
+    // SAORI と同じく、中の例外を SHIORI (wasm) に投げ返さない
+    directSstp: (req) => {
+      try {
+        return internalSaori(req, { fs: m.FS, root: ROOT, post }) ?? null;
+      } catch (e) {
+        log(`Direct SSTP: ${(e as Error).message}`);
+        return null;
+      }
+    },
+  };
   // DLL と同じく、ディレクトリは末尾に区切りを付けて渡す
   const dir = new TextEncoder().encode(`${ROOT}/`);
   if (!callLoad(m, dir)) log('SHIORI load() returned FALSE');

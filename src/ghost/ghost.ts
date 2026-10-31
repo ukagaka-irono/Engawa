@@ -170,8 +170,8 @@ export interface GhostEnv {
   environmentNotices(ghost: Ghost): Promise<void>;
   /** プラグイン (PLUGIN/2.0) */
   readonly plugins?: PluginBridge;
-  /** SSTP を受ける (SHIORI が送ったもの。同じページから) */
-  sstp?(request: string): Promise<string>;
+  /** SHIORI が送った SSTP を受ける (よそのページからのものと同じく制限する。key は送ったパッケージ) */
+  sstpFromPackage?(request: string, key: string): Promise<string>;
 }
 
 interface Scope {
@@ -207,6 +207,10 @@ interface ScriptContext {
   noTranslate?: boolean;
   /** このスクリプトを出したプラグインの ID (選択肢が選ばれたら、そのプラグインにも知らせる) */
   plugin?: string;
+  /** OnOtherGhostTalk へのプラグインの答え (これを話しても OnOtherGhostTalk を送らない) */
+  answersTalk?: boolean;
+  /** パスワードの入力の結果に答えたもの (Reference をほかに渡さない) */
+  secret?: boolean;
 }
 
 /** 音1つ (\![sound,…]) */
@@ -258,6 +262,13 @@ function uniqueGroups(groups: string[][]): string[][] {
  */
 const REMOTE_BLOCKED =
   /^(raise|notify|raiseother|notifyother|timerraise|timernotify|timerraiseother|timernotifyother|raiseplugin|notifyplugin|timerraiseplugin|timernotifyplugin|change|call|open|execute|vanishbymyself|updatebymyself|update|updateother|reload|unload|load|executesntp|biff|create),|^set,(property|wallpaper|tasktrayicon|trayballoon)$/;
+
+/**
+ * プラグインが書いたスクリプト (応答の Script) では使えない \![…]。プラグインは Target で起動中のすべてのゴーストに
+ * スクリプトを送れるので、ゴーストを消す・入れる・ファイルを書き換えるものは止める
+ * (着せ替え・バルーンの切り替え・ほかのゴーストを呼ぶ・ブラウザで開くなど、プラグインが使うものはそのまま)
+ */
+const PLUGIN_BLOCKED = /^(vanishbymyself|updatebymyself|update),|^execute,(install|extractarchive|compressarchive)$/;
 
 /** ファイル名から MIME タイプ (blob URL で開くときに要る) */
 function mimeOf(path: string): string {
@@ -424,6 +435,10 @@ export class Ghost implements PlayerHost {
   private get fromRemote(): boolean {
     return !!this.context.kinds?.includes('remote');
   }
+  /** 再生中のスクリプトを、プラグインが書いた (Script ヘッダ。PLUGIN_BLOCKED の \![…] は使えない) */
+  private get fromPluginScript(): boolean {
+    return !!this.context.plugin && !!this.context.kinds?.includes('plugin-script');
+  }
   /** 利用者がバルーンのダブルクリックで止めた (OnOtherGhostTalk の break) */
   private broken = false;
   /** マウスが乗っているスコープと当たり判定 (OnMouseEnterAll・OnMouseEnter 用) */
@@ -565,7 +580,7 @@ export class Ghost implements PlayerHost {
         this.env.log(this, 'error', m);
       },
       onSaori: (effect) => this.onSaori(effect),
-      onSstp: (request) => this.env.sstp?.(request) ?? Promise.resolve('SSTP/1.4 501 Not Implemented\r\n\r\n'),
+      onSstp: (request) => this.env.sstpFromPackage?.(request, this.key) ?? Promise.resolve('SSTP/1.4 501 Not Implemented\r\n\r\n'),
     });
     try {
       await shiori.load();
@@ -754,7 +769,11 @@ export class Ghost implements PlayerHost {
     for (const t of this.namedTimers.values()) clearTimeout(t);
     this.namedTimers.clear();
     for (const s of this.sounds.values()) this.stopSound(s, undefined);
-    this.closeSaoriAudio();
+    // SAORI (mciaudio) の曲は、SAORI が読み込んだままなので捨てずに止めるだけにする (戻ったら play で続きから)
+    for (const a of this.saoriAudio.values()) {
+      a.looping = false;
+      a.audio.pause();
+    }
     this.env.closeInput(this);
     this.endSelect(true);
     hideTooltip();
@@ -955,7 +974,7 @@ export class Ghost implements PlayerHost {
     // NOTIFY の返事のスクリプトは再生しない (ukadoc: NOTIFY はゴーストに知らせるだけ)
     if (!value || this.leaving || opts.method === 'NOTIFY') return undefined;
     if (opts.ifIdle && this.busy) return undefined;
-    const played = this.playScript(value, { event: id, refs: references, kinds: opts.kinds, noTranslate: opts.noTranslate });
+    const played = this.playScript(value, { event: id, refs: references, kinds: opts.kinds, noTranslate: opts.noTranslate, secret: opts.secret });
     if (opts.wait) await played;
     return value;
   }
@@ -971,8 +990,10 @@ export class Ghost implements PlayerHost {
 
   /** ほかのゴーストに OnOtherGhostTalk を送る (\![set,otherghosttalk] で頼んだゴーストだけ) */
   private tellOthers(when: 'before' | 'after', script: string, ctx: ScriptContext, kinds: string[]): void {
-    if (ctx.event === 'OnOtherGhostTalk') return;
-    const refs = [this.name, this.sakuraName, kinds.join(','), ctx.event ?? '', script, (ctx.refs ?? []).join('\x01')];
+    // OnOtherGhostTalk への答えを、また知らせると止まらない (プラグインどうしでも)
+    if (ctx.event === 'OnOtherGhostTalk' || ctx.answersTalk) return;
+    // パスワードの入力 (secret) のイベントの Reference は、ほかのゴースト・プラグインに渡さない
+    const refs = [this.name, this.sakuraName, kinds.join(','), ctx.event ?? '', script, ctx.secret ? '' : (ctx.refs ?? []).join('\x01')];
     for (const g of this.env.others(this)) if (g.otherGhostTalk === when) void g.raise('OnOtherGhostTalk', refs);
     // プラグインには、descript.txt の otherghosttalk で頼んだものに (自分のゴーストの話も含めて) 知らせる
     this.env.plugins?.talked(this, when, refs, ctx.plugin);
@@ -2261,9 +2282,14 @@ export class Ghost implements PlayerHost {
       this.env.log(this, 'error', `よそのページからの SSTP のスクリプトでは使えません: \\![${arg.slice(0, 2).join(',')}]`);
       return;
     }
+    if (this.fromPluginScript && PLUGIN_BLOCKED.test(`${cmd},${sub}`)) {
+      this.env.log(this, 'error', `プラグインのスクリプトでは使えません: \\![${arg.slice(0, 2).join(',')}]`);
+      return;
+    }
     const raiseEvent = hasOption(arg, 'raise-event');
-    // プラグインが出したスクリプトの \![raise]・\![notify]・\![get,property] のイベントは、そのプラグインに返す
-    const plugin = this.context.plugin;
+    // プラグインが書いたスクリプトの \![raise]・\![notify]・\![get,property] のイベントは、そのプラグインに返す
+    // (プラグインの Event にゴーストが答えたスクリプトは、ゴーストのものなのでゴーストに)
+    const plugin = this.fromPluginScript ? this.context.plugin : undefined;
     if (plugin && arg[1] && (cmd === 'raise' || cmd === 'notify' || (cmd === 'get' && sub === 'property' && arg[2]))) {
       const [id, refs] = cmd === 'get' ? [arg[2], arg.slice(3).map((p) => this.property(p))] : [arg[1], arg.slice(2)];
       void this.env.plugins?.forward(this, plugin, cmd === 'notify' ? 'NOTIFY' : 'GET', [[id, refs]]);
@@ -2589,8 +2615,8 @@ export class Ghost implements PlayerHost {
       noClose: args.some((x) => /^--option=+noclose$/i.test(x)),
     };
     const extra = type === 'slider' ? `${req.min ?? 0},${req.max ?? 100}` : '';
-    // プラグインが出したスクリプトの入力ボックスなら、結果はそのプラグインに送る
-    const plugin = this.context.plugin;
+    // プラグインが書いたスクリプトの入力ボックスなら、結果はそのプラグインに送る
+    const plugin = this.fromPluginScript ? this.context.plugin : undefined;
     const send = async (event: string, r: Reference[], opts: RaiseOptions = {}): Promise<boolean> =>
       plugin ? !!(await this.env.plugins?.forward(this, plugin, 'GET', [[event, r]])) : !!(await this.raise(event, r, opts));
     const res = await this.openInput(req);

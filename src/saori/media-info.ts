@@ -240,10 +240,12 @@ function parseWav(d: Uint8Array): Parsed {
     if (id === 'fmt ') byteRate = u32le(d, body + 8);
     else if (id === 'data') dataSize = Math.min(size, d.length - body);
     else if (id === 'LIST' && ascii(d, body, 4) === 'INFO') {
-      for (let q = body + 4; q + 8 <= body + size; ) {
+      // 大きさはファイルに書かれた値なので、ファイルの終わりを越えて読み続けないようにする
+      const end = Math.min(body + size, d.length);
+      for (let q = body + 4; q + 8 <= end; ) {
         const sub = ascii(d, q, 4);
         const len = u32le(d, q + 4);
-        if (info[sub]) add(tags, info[sub], legacyText(d.subarray(q + 8, q + 8 + len)));
+        if (info[sub]) add(tags, info[sub], legacyText(d.subarray(q + 8, Math.min(q + 8 + len, end))));
         q += 8 + len + (len & 1);
       }
     }
@@ -254,11 +256,16 @@ function parseWav(d: Uint8Array): Parsed {
 
 // ---------------------------------------------------------------- Ogg (Vorbis・Opus)
 
+/** Ogg のパケット1つの上限 (タグはこれより先を読まない) */
+const MAX_PACKET = 4 * 1024 * 1024;
+
 function parseOgg(d: Uint8Array): Parsed {
   const tags: Parsed['tags'] = {};
   // 先頭の数ページのパケットをつなぐ (コメントのパケットは複数のページにまたがることがある)
   const packets: Uint8Array[] = [];
-  let current: number[] = [];
+  // 終わらないパケット (区切りが 255 ばかり) で、ファイル全体を写さないように、1つのパケットは MAX_PACKET までにする
+  let current: Uint8Array[] = [];
+  let currentLength = 0;
   let lastGranule = 0;
   for (let p = 0; p + 27 <= d.length && ascii(d, p, 4) === 'OggS'; ) {
     const granuleLo = u32le(d, p + 6);
@@ -267,12 +274,23 @@ function parseOgg(d: Uint8Array): Parsed {
     const segs = d[p + 26];
     let body = p + 27 + segs;
     for (let s = 0; s < segs; s++) {
-      const len = d[p + 27 + s];
-      if (packets.length < 3) for (let i = 0; i < len; i++) current.push(d[body + i]);
+      const len = d[p + 27 + s] ?? 0;
+      if (packets.length < 3 && currentLength < MAX_PACKET) {
+        const chunk = d.subarray(body, Math.min(body + len, d.length));
+        current.push(chunk);
+        currentLength += chunk.length;
+      }
       body += len;
       if (len < 255 && packets.length < 3) {
-        packets.push(Uint8Array.from(current));
+        const packet = new Uint8Array(currentLength);
+        let at = 0;
+        for (const c of current) {
+          packet.set(c, at);
+          at += c.length;
+        }
+        packets.push(packet);
         current = [];
+        currentLength = 0;
       }
     }
     p = body;
