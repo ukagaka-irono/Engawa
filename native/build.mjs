@@ -161,7 +161,7 @@ async function buildRust(engine, src, buildDir) {
   const tomlPath = (dir) => JSON.stringify(dir.replace(/\\/g, '/'));
   const patches = Object.entries(engine.rust.patch ?? {}).map(([name, dir]) => `${name} = { path = ${tomlPath(join(nativeDir, 'shim', dir))} }`);
   if (patches.length) writeFileSync(join(crate, 'Cargo.toml'), `${readFileSync(join(crate, 'Cargo.toml'), 'utf-8')}\n\n[patch.crates-io]\n${patches.join('\n')}\n`);
-  // 依存のクレートを直して使うもの (engines.mjs・saoris.mjs の rust.vendor: { 名前: { version, replace: [[探す, 置く]…] } })。
+  // 依存のクレートを直して使うもの (engines.mjs・saoris.mjs の rust.vendor: { 名前: { version, replace: [[探す, 置く]…], note? } }。note はライセンスの一覧に書く)。
   // crates.io から取ってきたものを build/ に写し、.rs のすべての「探す」を「置く」にして [patch.crates-io] で差し替える
   const vendors = Object.entries(engine.rust.vendor ?? {});
   if (vendors.length) {
@@ -213,7 +213,9 @@ async function buildRust(engine, src, buildDir) {
         env: {
           ...env,
           CARGO_TARGET_DIR: target,
-          RUSTFLAGS: '-Cpanic=abort',
+          // rust.vendor で直したクレートは path の依存になり、crates.io のものと違って lint が抑えられない。
+          // 古いクレート (rlua 0.17 など) が今の Rust の deny の lint で止まらないように、どれも warn までにする
+          RUSTFLAGS: vendors.length ? '-Cpanic=abort --cap-lints=warn' : '-Cpanic=abort',
           CARGO_PROFILE_RELEASE_PANIC: 'abort',
           // 依存のクレートが自分で wasm をリンクすることがある (rustc は PATH の emcc を使う)
           [pathKey]: `${emDir}${delimiter}${env[pathKey] ?? ''}`,
@@ -274,7 +276,7 @@ const section = (title, text) => `${'-'.repeat(72)}\n${title}\n${'-'.repeat(72)}
  * Rust の依存クレート (wasm に入るもの) のライセンス。ビルドのときだけ使うクレート (build・proc-macro) は除く。
  * package はワークスペースのうち組み込むクレートの名前 (ワークスペースだけの Cargo.toml では root が無いため)
  */
-function rustLicenses(crate, packageName) {
+function rustLicenses(crate, packageName, vendor = {}) {
   const meta = JSON.parse(
     execFileSync(cargo, ['+nightly', 'metadata', '--format-version', '1', '--filter-platform', 'wasm32-unknown-emscripten'], {
       cwd: crate,
@@ -312,7 +314,8 @@ function rustLicenses(crate, packageName) {
     const mit = /\bMIT\b/.test(pkg.license ?? '') && files.find((f) => /^licen[cs]e-mit/i.test(f));
     const chosen = mit ? [mit] : files;
     const text = chosen.length ? chosen.map((f) => readFileSync(join(dir, f), 'utf-8').replace(/\r\n?/g, '\n').trim()).join('\n\n') : `(ライセンス: ${pkg.license ?? '不明'})`;
-    const note = vendored ? '。Engawa で wasm32 向けの部分を外したもの' : '';
+    // rust.vendor の note (何を直したか)。無ければ fast_image_resize のときの説明
+    const note = vendored ? `。${vendor[pkg.name]?.note ?? 'Engawa で wasm32 向けの部分を外したもの'}` : '';
     out.push(section(`${pkg.name} ${pkg.version} (Rust のクレート、${pkg.license ?? 'ライセンス不明'}${note})`, text));
   }
   return out;
@@ -519,7 +522,7 @@ async function build(engine) {
     join(out, `${engine.name}.d.mts`),
     `// native/build.mjs が作ったもの。手で編集しない\nimport type { EngineFactory } from '../../shiori/native-engines';\ndeclare const create: EngineFactory;\nexport default create;\n`,
   );
-  writeLicenses(engine, locate, engine.rust ? [section('Rust の標準ライブラリ (The Rust Project Developers、MIT OR Apache-2.0)', readFileSync(join(rustToolchain('nightly'), 'share', 'doc', 'cargo', 'LICENSE-MIT'), 'utf-8').trim()), ...rustLicenses(join(buildDir, 'crate'), engine.rust.package)] : []);
+  writeLicenses(engine, locate, engine.rust ? [section('Rust の標準ライブラリ (The Rust Project Developers、MIT OR Apache-2.0)', readFileSync(join(rustToolchain('nightly'), 'share', 'doc', 'cargo', 'LICENSE-MIT'), 'utf-8').trim()), ...rustLicenses(join(buildDir, 'crate'), engine.rust.package, engine.rust.vendor)] : []);
   console.log(`[${engine.name}] ${relative(root, out)}/${engine.name}.wasm.gz  ${(wasm.length / 1e6).toFixed(2)} MB → ${(gz.length / 1e6).toFixed(2)} MB`);
 }
 

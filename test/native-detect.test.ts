@@ -17,6 +17,7 @@ describe('detectNativeEngine', () => {
     expect(detectNativeEngine('shiori.dll', ghost({ 'shiori.dll': dll('Sender: nashi') }))?.id).toBe('nashi');
     expect(detectNativeEngine('shiori.dll', ghost({ 'shiori.dll': dll('talks/main.mnt') }))?.id).toBe('minato');
     expect(detectNativeEngine('kagari.dll', ghost({ 'kagari.dll': dll('index.lua') }))?.id).toBe('kagari');
+    expect(detectNativeEngine('emo.dll', ghost({ 'emo.dll': dll('[emo::unload] ') }))?.id).toBe('emo');
     expect(detectNativeEngine('quickshiori.dll', ghost({ 'quickshiori.dll': dll('__shiori_request') }))?.id).toBe('quickshiori');
   });
 
@@ -25,6 +26,7 @@ describe('detectNativeEngine', () => {
     expect(detectNativeEngine('YAYA.DLL', ghost({}))?.id).toBe('yaya');
     expect(detectNativeEngine('shiori.dll', ghost({ 'kawarirc.kis': '' }))?.id).toBe('kawari');
     expect(detectNativeEngine('shiori.dll', ghost({ 'talks/main.mnt': '' }))?.id).toBe('minato');
+    expect(detectNativeEngine('shiori.dll', ghost({ 'emo/shiori/init.lua': '' }))?.id).toBe('emo');
   });
 
   it('どれにも当たらなければ undefined', () => {

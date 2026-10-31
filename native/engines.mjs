@@ -290,6 +290,177 @@ export const ENGINES = [
     ldflags: ['-sSTACK_SIZE=16MB'],
   },
   {
+    name: 'emo',
+    label: 'emo',
+    licenses: [
+      { title: 'emo (MIT)', file: 'LICENSE' },
+      { title: 'Lua 5.3 (MIT)', file: 'c/lua/lua.h', from: '* Copyright (C) 1994', to: '******************************************************************************/' },
+    ],
+    repo: 'https://github.com/ekicyou/emo-rs.git',
+    // 0.5.2 (stable)。『えも？』(ekicyou/emo-gs) が同梱している emo.dll はこの版 (2020-08-10)
+    commit: 'b4a252c4fd142ade10563b6ad99f07a966d1a420',
+    // Rust 製 (rlua で Lua 5.3 を動かす。Lua はリポジトリの c/lua を build.rs が組む)。ゴーストの emo/・dic/ の Lua を読む。
+    //   - DLL の入口 (windows.rs) は Windows 向けなので、Shiori をそのまま呼ぶ入口を足す
+    //   - 使っていない rustyline (端末の行編集) はブラウザ向けに組めないので外す
+    //   - Lua のモジュールを探すパスを \ でなく / で作る
+    //   - shiori3 0.4.1 は Windows でしか組めない (api.rs と ANSI の変換が winapi を使う) ので、ほかでは Shiori3 の trait と
+    //     UTF-8 の Encoding だけを持つようにする (元の enc.rs も「Windows 以外では UTF-8」としている)
+    rust: {
+      lib: 'emo',
+      vendor: {
+        // 今の Rust では、捨てる戻り値の型が ! と推論されて通らない (rlua 0.17 は古い推論のときのもの) ので、() と書く
+        // lua_error は C では int を返す (戻らない) が、rlua は -> ! と書いている。wasm では型の違う関数は呼べない (罠になる) ので、
+        // C と同じ型で宣言し、-> ! の lua_error はそれを呼ぶ関数にする
+        rlua: {
+          version: '0.17.1',
+          note: 'Engawa で今の Rust と wasm で組めるように、型の書き方を直したもの',
+          replace: [
+            ['self.call(())?;', 'self.call::<_, ()>(())?;'],
+            // Lua 5.3 の lua_setmetatable は int を返す (rlua は返さないと書いている。呼ぶ側は戻り値を使わない)
+            ['    pub fn lua_setmetatable(state: *mut lua_State, index: c_int);', '    pub fn lua_setmetatable(state: *mut lua_State, index: c_int) -> c_int;'],
+            ['    pub fn lua_error(state: *mut lua_State) -> !;', '    #[link_name = "lua_error"]\n    fn lua_error_c(state: *mut lua_State) -> c_int;'],
+            [
+              'pub type lua_Integer = c_longlong;',
+              'pub type lua_Integer = c_longlong;\n\npub unsafe fn lua_error(state: *mut lua_State) -> ! {\n    lua_error_c(state);\n    std::process::abort()\n}',
+            ],
+          ],
+        },
+        // Cargo.toml の "0.4.1" は 0.4.2 になる (0.4.1 との違いはログの文字だけ)
+        shiori3: {
+          version: '0.4.2',
+          note: 'Engawa で Windows 以外でも組めるように、Windows の API を使う部分を外したもの',
+          replace: [
+            [
+              'mod api;',
+              '#[cfg(windows)]\nmod api;\n' +
+                '#[cfg(not(windows))]\n' +
+                'mod api {\n' +
+                '    use std::borrow::Cow;\n' +
+                '    use std::path::Path;\n' +
+                '    pub trait Shiori3: Sized {\n' +
+                '        fn load<P: AsRef<Path>>(h_inst: usize, load_dir: P, load_dir_bytes: &[u8]) -> Result<Self, failure::Error>;\n' +
+                "        fn request<'a, S: Into<&'a str>>(&mut self, req: S) -> Result<Cow<'a, str>, failure::Error>;\n" +
+                '    }\n' +
+                '}',
+            ],
+            ['pub use crate::api::RawShiori3;', '#[cfg(windows)]\npub use crate::api::RawShiori3;'],
+            ['pub use crate::hglobal::enc::Encoder;', '#[cfg(windows)]\npub use crate::hglobal::enc::Encoder;'],
+            [
+              'pub use crate::hglobal::enc::Encoding;',
+              '#[cfg(windows)]\npub use crate::hglobal::enc::Encoding;\n' +
+                '#[cfg(not(windows))]\n' +
+                'pub use crate::engawa_enc::{Encoder, Encoding};\n' +
+                '#[cfg(not(windows))]\n' +
+                'mod engawa_enc {\n' +
+                '    use std::io::{Error, ErrorKind, Result};\n' +
+                '    pub trait Encoder {\n' +
+                '        fn to_string(&self, data: &[u8]) -> Result<String>;\n' +
+                '        fn to_bytes(&self, data: &str) -> Result<Vec<u8>>;\n' +
+                '    }\n' +
+                '    pub enum Encoding {\n' +
+                '        ANSI,\n' +
+                '        OEM,\n' +
+                '    }\n' +
+                '    impl Encoder for Encoding {\n' +
+                '        fn to_string(&self, data: &[u8]) -> Result<String> {\n' +
+                '            String::from_utf8(data.to_vec()).map_err(|e| Error::new(ErrorKind::InvalidData, e))\n' +
+                '        }\n' +
+                '        fn to_bytes(&self, data: &str) -> Result<Vec<u8>> {\n' +
+                '            Ok(data.as_bytes().to_vec())\n' +
+                '        }\n' +
+                '    }\n' +
+                '}',
+            ],
+          ],
+        },
+      },
+    },
+    edits: {
+      'Cargo.toml': [['rustyline = "6.2"\n', '']],
+      'src/lua_path.rs': [
+        ['add_path("\\\\?.");', 'add_path("/?.");'],
+        ['add_path("\\\\?\\\\init.");', 'add_path("/?/init.");'],
+        ['add_path("\\\\profile\\\\emo\\\\save");', 'add_path("/profile/emo/save");'],
+        ['add_path("\\\\dic");', 'add_path("/dic");'],
+        ['add_path("\\\\emo");', 'add_path("/emo");'],
+      ],
+      'src/lib.rs': [
+        [
+          'pub mod windows;',
+          'pub mod windows;\n\n' +
+            '/// Engawa (Emscripten) の入口。渡されるバイト列は malloc したもの (GlobalAlloc の代わり) で、こちらで free する。\n' +
+            '/// 失敗は ErrorLevel・ErrorDescription を付けた 500 で返す\n' +
+            '#[cfg(target_os = "emscripten")]\n' +
+            'mod engawa {\n' +
+            '    use crate::shiori::Shiori;\n' +
+            '    use shiori3::Shiori3;\n' +
+            '    use std::cell::RefCell;\n' +
+            '    use std::os::raw::c_long;\n' +
+            '    extern "C" {\n' +
+            '        fn malloc(size: usize) -> *mut u8;\n' +
+            '        fn free(ptr: *mut u8);\n' +
+            '    }\n' +
+            '    thread_local! {\n' +
+            '        static SHIORI: RefCell<Option<Shiori>> = RefCell::new(None);\n' +
+            '    }\n' +
+            '    unsafe fn take(ptr: *mut u8, len: usize) -> Vec<u8> {\n' +
+            '        let v = std::slice::from_raw_parts(ptr, len).to_vec();\n' +
+            '        free(ptr);\n' +
+            '        v\n' +
+            '    }\n' +
+            '    fn error_response(e: &dyn std::fmt::Display) -> String {\n' +
+            '        let text = e.to_string().replace(|c| c == \'\\r\' || c == \'\\n\', " ");\n' +
+            '        format!("SHIORI/3.0 500 Internal Server Error\\r\\nCharset: UTF-8\\r\\nSender: emo\\r\\nErrorLevel: error\\r\\nErrorDescription: {}\\r\\n\\r\\n", text)\n' +
+            '    }\n' +
+            '    #[no_mangle]\n' +
+            '    pub unsafe extern "C" fn load(h: *mut u8, len: c_long) -> i32 {\n' +
+            '        let bytes = take(h, len.max(0) as usize);\n' +
+            '        let dir = String::from_utf8_lossy(&bytes).into_owned();\n' +
+            '        match Shiori::load(0, &dir, &bytes) {\n' +
+            '            Ok(shiori) => {\n' +
+            '                SHIORI.with(|s| *s.borrow_mut() = Some(shiori));\n' +
+            '                1\n' +
+            '            }\n' +
+            '            Err(e) => {\n' +
+            '                eprintln!("emo load: {}", e);\n' +
+            '                0\n' +
+            '            }\n' +
+            '        }\n' +
+            '    }\n' +
+            '    #[no_mangle]\n' +
+            '    pub unsafe extern "C" fn request(h: *mut u8, len: *mut c_long) -> *mut u8 {\n' +
+            '        let bytes = take(h, (*len).max(0) as usize);\n' +
+            '        let req = String::from_utf8_lossy(&bytes).into_owned();\n' +
+            '        let res = SHIORI.with(|s| match s.borrow_mut().as_mut() {\n' +
+            '            Some(shiori) => match shiori.request(req.as_str()) {\n' +
+            '                Ok(res) => res.into_owned(),\n' +
+            '                Err(e) => error_response(&e),\n' +
+            '            },\n' +
+            '            None => error_response(&"emo is not loaded"),\n' +
+            '        });\n' +
+            '        let bytes = res.into_bytes();\n' +
+            '        let out = malloc(bytes.len() + 1);\n' +
+            '        if out.is_null() {\n' +
+            '            *len = 0;\n' +
+            '            return out;\n' +
+            '        }\n' +
+            '        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());\n' +
+            '        *out.add(bytes.len()) = 0;\n' +
+            '        *len = bytes.len() as c_long;\n' +
+            '        out\n' +
+            '    }\n' +
+            '    #[no_mangle]\n' +
+            '    pub extern "C" fn unload() -> i32 {\n' +
+            '        SHIORI.with(|s| drop(s.borrow_mut().take()));\n' +
+            '        1\n' +
+            '    }\n' +
+            '}',
+        ],
+      ],
+    },
+    ldflags: ['-sSTACK_SIZE=16MB'],
+  },
+  {
     name: 'kagari',
     label: 'kagari',
     licenses: [

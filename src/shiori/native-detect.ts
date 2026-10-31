@@ -3,6 +3,7 @@ import { containsText } from '../util/bytes';
 import type { EngineId } from './native-engines';
 // 本体の wasm (gzip)。ビルドでは data: URL として index.html に埋め込まれる
 import AYA5_WASM from '../assets/shiori/aya5.wasm.gz?url';
+import EMO_WASM from '../assets/shiori/emo.wasm.gz?url';
 import KAGARI_WASM from '../assets/shiori/kagari.wasm.gz?url';
 import KAWARI_WASM from '../assets/shiori/kawari.wasm.gz?url';
 import KAWARI7_WASM from '../assets/shiori/kawari7.wasm.gz?url';
@@ -46,6 +47,8 @@ const RULES: Rule[] = [
   { id: 'minato', label: 'minato', wasmUrl: MINATO_WASM, signatures: ['main.mnt'], dllNames: ['minato.dll'], markers: ['talks/main.mnt'] },
   // pasta (Rust と Lua) は pasta.toml を読む。中に Lua の台本 (main.lua など) を持つので、kagari より先に調べる
   { id: 'pasta', label: 'pasta', wasmUrl: PASTA_WASM, signatures: ['pasta.toml'], dllNames: ['pasta.dll'], markers: ['pasta.toml'] },
+  // emo (Rust と Lua 5.3。pasta の前身) は emo/shiori/init.lua を読む。DLL の中のログの文字で見分ける
+  { id: 'emo', label: 'emo', wasmUrl: EMO_WASM, signatures: ['[emo::unload]'], dllNames: ['emo.dll'], markers: ['emo/shiori/init.lua'] },
   // kagari (Lua 5.4) は index.lua を読む。kotori のゴーストには kagari.conf.lua がある
   { id: 'kagari', label: 'kagari', wasmUrl: KAGARI_WASM, signatures: ['index.lua'], dllNames: ['kagari.dll'], markers: ['kagari.conf.lua'] },
   // quickshiori (QuickJS) は index.js の globalThis.__shiori_request を呼ぶ

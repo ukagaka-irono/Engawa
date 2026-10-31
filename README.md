@@ -92,6 +92,7 @@ Internet Explorer には対応していません。
 | なし栞 | nashi.dll | [yanashi-interface/nashi-shiori-studio](https://github.com/yanashi-interface/nashi-shiori-studio) |
 | minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) |
 | pasta (Rust と Lua) | pasta.dll (pasta.toml) | [ekicyou/pasta](https://github.com/ekicyou/pasta) (LuaJIT の代わりに Lua 5.4 で動かす) |
+| emo (Rust と Lua 5.3。pasta の前身) | emo.dll | [ekicyou/emo-rs](https://github.com/ekicyou/emo-rs) (0.5.2) |
 | kagari (Lua 5.4。kotori を含む) | kagari.dll | [Tatakinov/kagari_shiori](https://github.com/Tatakinov/kagari_shiori) (ゴーストが同梱する C のモジュールのうち、LPeg は組み込み、lua-utf8・luachild・iconv・rand は作り直したものを使う) |
 | quickshiori (QuickJS) | quickshiori.dll | [cronfox/quickshiori](https://github.com/cronfox/quickshiori) |
 
