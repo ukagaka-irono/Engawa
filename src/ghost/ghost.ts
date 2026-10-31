@@ -30,7 +30,7 @@ import { addHistory, ghostState, saveSettings, settings, type GhostState } from 
 import { randomWord } from './words';
 
 export const BASEWARE_NAME = 'Engawa';
-export const BASEWARE_VERSION = '0.1.0';
+export const BASEWARE_VERSION = '0.1.0-beta';
 
 export type BootMode =
   | { kind: 'boot' }

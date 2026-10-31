@@ -1,6 +1,6 @@
 {
   "name": "engawa",
-  "version": "0.1.0",
+  "version": "0.1.0-beta",
   "description": "ブラウザで動く伺かベースウェア (SSP 互換を目指す)",
   "private": true,
   "type": "module",
