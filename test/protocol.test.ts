@@ -64,6 +64,17 @@ describe('paths and archives', () => {
     expect(tree.get('shell/master/からだ.png')).toEqual(new Uint8Array([1, 2, 3]));
     expect(tree.has('install.txt')).toBe(true);
   });
+
+  it('skips folder entries named with backslashes', () => {
+    // Windows の道具で作った nar にある (フォルダを空のファイルとして置くと、中のファイルを置けなくなる)
+    const zip = zipSync({ 'ghost\\master\\ex\\': new Uint8Array(), 'ghost\\master\\ex\\a.txt': new Uint8Array([1]) });
+    const tree = filesFromZip(zip);
+    expect([...tree.entries()].map(([p]) => p)).toEqual(['ghost/master/ex/a.txt']);
+    // 2バイト目が \ の Shift_JIS (ソ = 83 5C) で終わる名前はファイル
+    const sjis = zipSync({ QZ: new Uint8Array([2]) });
+    for (let i = 0; i + 1 < sjis.length; i++) if (sjis[i] === 0x51 && sjis[i + 1] === 0x5a) sjis.set([0x83, 0x5c], i);
+    expect([...filesFromZip(sjis).entries()].map(([p]) => p)).toEqual(['ソ']);
+  });
 });
 
 describe('images', () => {

@@ -6,6 +6,8 @@ import type { PackageMeta, Refresh } from '../src/vfs/storage';
 const db = vi.hoisted(() => ({
   metas: new Map<string, PackageMeta>(),
   puts: [] as { meta: PackageMeta; paths: string[]; prefix: string; refresh?: Refresh }[],
+  stored: new Map<string, Uint8Array>(),
+  deleted: [] as { key: string; paths: string[]; keep: string[] }[],
 }));
 vi.mock('../src/vfs/storage', () => ({
   getPackage: async (key: string) => db.metas.get(key),
@@ -13,6 +15,8 @@ vi.mock('../src/vfs/storage', () => ({
     db.metas.set(meta.key, meta);
     db.puts.push({ meta, paths: [...files.entries()].map(([p]) => prefix + p).sort(), prefix, refresh });
   },
+  readPackageFile: async (key: string, path: string) => db.stored.get(`${key}:${path}`),
+  deletePackageFiles: async (key: string, paths: string[], keep: Iterable<string> = []) => void db.deleted.push({ key, paths, keep: [...keep].sort() }),
 }));
 
 const { installFiles, InstallError } = await import('../src/package/installer');
@@ -27,6 +31,8 @@ const ghost = (key: string, sakuraName: string, acceptNames?: string[]) => ({ ke
 beforeEach(() => {
   db.metas.clear();
   db.puts.length = 0;
+  db.stored.clear();
+  db.deleted.length = 0;
   for (const key of ['ghost/a', 'ghost/a2', 'ghost/b']) {
     db.metas.set(key, { key, kind: 'ghost', dir: key.slice(6), name: key, installedAt: 0 });
   }
@@ -137,10 +143,50 @@ describe('installFiles', () => {
     expect(db.metas.get('ghost/g')).toMatchObject({ name: 'エミリ', defaultBalloon: 'balloon/x', sakuraName: 'エミリ' });
   });
 
-  it('rejects unknown and unsupported types instead of guessing from the contents', async () => {
+  it('rejects unknown types instead of guessing from the contents', async () => {
     const files = { 'ghost/master/descript.txt': 'name,G' };
-    await expect(installFiles(tree({ 'install.txt': 'type,plugin', ...files }), 'p.nar')).rejects.toMatchObject({ reason: 'unsupported' });
     await expect(installFiles(tree({ 'install.txt': 'type,mystery', ...files }), 'p.nar')).rejects.toMatchObject({ reason: 'invalid type' });
+  });
+
+  it('stores plugins, headlines and calendar parts as their own packages (they cannot run, as in SSP they are kept)', async () => {
+    const r = await installFiles(tree({ 'install.txt': 'type,plugin\r\ndirectory,clock\r\nname,時計', 'descript.txt': 'name,時計プラグイン', 'clock.dll': '' }), 'clock.nar');
+    expect(r).toMatchObject({ type: 'plugin', key: 'plugin/clock', name: '時計プラグイン', installed: [{ type: 'plugin', key: 'plugin/clock' }] });
+    expect(db.metas.get('plugin/clock')).toMatchObject({ kind: 'plugin' });
+    const c = await installFiles(tree({ 'install.txt': 'type,calendar.skin\r\ndirectory,cal', 'descript.txt': 'name,こよみ' }), 'cal.nar');
+    expect(c).toMatchObject({ type: 'calendar skin', key: 'calendar skin/cal' });
+  });
+
+  it('installs every part of a package (type,package) and bundled plugins and headlines', async () => {
+    const r = await installFiles(
+      tree({
+        'install.txt': 'type,package\r\nname,ご一家',
+        'g/install.txt': 'type,ghost\r\ndirectory,emily\r\nplugin.directory,ext\r\nplugin.source.directory,ext',
+        'g/ghost/master/descript.txt': 'name,エミリ\r\nsakura.name,エミリ',
+        'g/ext/descript.txt': 'name,拡張',
+        'b/install.txt': 'type,balloon\r\ndirectory,pink',
+        'b/descript.txt': 'name,ピンク',
+      }),
+      'family.nar',
+    );
+    expect(r).toMatchObject({ type: 'package', name: 'ご一家', key: 'ghost/emily' });
+    expect(r.installed.map((i) => i.key).sort()).toEqual(['balloon/pink', 'ghost/emily', 'plugin/ext']);
+    expect(db.puts.find((p) => p.meta.key === 'ghost/emily')!.paths).toEqual(['ghost/master/descript.txt']);
+  });
+
+  it('removes the files listed in delete.txt, but not the ones the archive brings again', async () => {
+    db.metas.set('ghost/emily', { key: 'ghost/emily', kind: 'ghost', dir: 'emily', name: 'エミリ', installedAt: 0 });
+    await installFiles(
+      tree({ 'install.txt': 'type,ghost\r\ndirectory,emily', 'ghost/master/descript.txt': 'name,エミリ', 'delete.txt': 'ghost\\master\\old.dic\r\nghost\\master\\descript.txt\r\nghost\\master\\obsolete\\\r\n..\\evil.txt' }),
+      'emily.nar',
+    );
+    // 消さないもの (アーカイブが持ってきたファイル) は keep として渡し、storage がフォルダの中でも残す
+    expect(db.deleted).toEqual([
+      {
+        key: 'ghost/emily',
+        paths: ['ghost\\master\\old.dic', 'ghost\\master\\descript.txt', 'ghost\\master\\obsolete\\'],
+        keep: ['delete.txt', 'ghost/master/descript.txt'],
+      },
+    ]);
   });
 
   it('installs a supplement into the accepting ghost at its root', async () => {

@@ -2,3 +2,6 @@ node_modules/
 dist/
 .idea/workspace.xml
 *.log
+native/.src/
+native/.build/
+tools/.compat/

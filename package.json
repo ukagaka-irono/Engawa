@@ -1,12 +1,12 @@
 {
   "name": "engawa",
-  "version": "0.1.0",
+  "version": "0.1.0-beta",
   "description": "ブラウザで動く伺かベースウェア (SSP 互換を目指す)",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && vite build -c vite.embed.config.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "sample": "node tools/make-sample-ghost.mjs"
@@ -17,6 +17,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "decimal.js": "^10.6.0",
     "dialog-polyfill": "^0.5.6",
     "fflate": "^0.8.3"
   },

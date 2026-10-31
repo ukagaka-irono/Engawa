@@ -1,100 +1,107 @@
 import type { FileTree } from '../vfs/files';
 import type { Shiori, ShioriHooks } from './shiori';
 import ShioriWorker from './shiori-worker.ts?worker&inline';
-import type { FromWorker, ToWorker } from './worker-protocol';
-
-const REQUEST_TIMEOUT_MS = 10_000;
-const UNLOAD_TIMEOUT_MS = 3_000;
-
-type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
-type Pending = { resolve(v: string | undefined): void; reject(e: Error): void; timer: number };
+import { REQUEST_TIMEOUT_MS, WorkerShiori } from './worker-shiori';
 
 /**
  * JavaScript で書かれた SHIORI。ghost/master/<shiori> を ES モジュールとして Web Worker 内で読み込む。
  * モジュールは `load(dir)`, `request(text)`, `unload()` を export する (request は Promise でもよい)。
+ *
+ * ゴーストの JavaScript は信頼できないので、Worker はこのページのオリジンを持たないように data: の URL から起こす
+ * (blob: の Worker はページと同じオリジンになり、IndexedDB のほかのゴーストのデータやクッキー付きの通信に届いてしまう)。
+ * data: の Worker を起こせないブラウザでは、これまでどおり blob: から起こす。
  */
-export class JsShiori implements Shiori {
-  private worker?: Worker;
-  private seq = 0;
-  private readonly pending = new Map<number, Pending>();
-
+export class JsShiori extends WorkerShiori implements Shiori {
+  /** node があれば、SHIOLINK で Node.js のプログラムとして動かす (argv はスクリプトと引数。node-runtime.ts) */
   constructor(
     private readonly files: FileTree,
     readonly name: string,
-    private readonly hooks: ShioriHooks,
-  ) {}
+    hooks: ShioriHooks,
+    private readonly node?: { argv: string[] },
+  ) {
+    super(hooks);
+    this.acceptsSstp = !!node;
+  }
 
   async load(): Promise<void> {
     // Worker は Blob として埋め込む (file:// で開いた index.html からでも起動できるように)
-    this.worker = new ShioriWorker();
-    this.worker.onmessage = (e: MessageEvent<FromWorker>) => this.onMessage(e.data);
-    this.worker.onerror = (e) => this.hooks.onLog(`SHIORI worker error: ${e.message}`);
     const master = this.files.sub('ghost/master');
-    try {
-      await this.call(
-        { type: 'load', files: [...master.entries()], entry: this.name, dir: 'ghost/master/' },
-        REQUEST_TIMEOUT_MS * 3,
-      );
-    } catch (e) {
-      // 読み込みに失敗した Worker は残さない (ファイルの写しを持ったまま、ループしていることもある)
-      this.terminate('SHIORI load failed');
-      throw e;
-    }
+    // Node.js のプログラムには、同梱の node.exe や DLL は要らない (大きいので Worker に写さない)
+    const entries = [...master.entries()].filter(([p]) => !this.node || !/\.(exe|dll)$/i.test(p));
+    const url = await isolatedWorkerUrl();
+    if (!url) console.warn('[engawa] JavaScript の SHIORI を、オリジンを持たない Worker で動かせません (このページと同じオリジンで動かします)');
+    return this.start(url ? new Worker(url, { name: this.name }) : new ShioriWorker(), { type: 'load', files: entries, entry: this.name, dir: 'ghost/master/', node: this.node } as never);
   }
 
   async request(text: string): Promise<string> {
-    return (await this.call({ type: 'request', text }, REQUEST_TIMEOUT_MS)) ?? '';
+    return ((await this.call({ type: 'request', text } as never, REQUEST_TIMEOUT_MS)) as string | undefined) ?? '';
   }
 
-  async unload(): Promise<void> {
-    if (!this.worker) return;
+  unload(): Promise<void> {
+    return this.stop({ type: 'unload' });
+  }
+}
+
+let isolated: Promise<string | undefined> | undefined;
+
+/** shiori-worker を起こす data: の URL。開発用のサーバー (Worker を別のモジュールとして読む) と、data: の Worker を起こせないときは undefined */
+function isolatedWorkerUrl(): Promise<string | undefined> {
+  return (isolated ??= (async () => {
+    if (import.meta.env.DEV || typeof Worker === 'undefined') return undefined;
     try {
-      await this.call({ type: 'unload' }, UNLOAD_TIMEOUT_MS);
-    } catch (e) {
-      this.hooks.onLog(`SHIORI unload: ${(e as Error).message}`);
-    } finally {
-      this.terminate('SHIORI unloaded');
+      if (!(await dataWorkerWorks())) return undefined;
+      return `data:text/javascript;charset=utf-8,${encodeURIComponent(await workerCode())}`;
+    } catch {
+      return undefined;
     }
-  }
+  })());
+}
 
-  private terminate(reason: string): void {
-    this.worker?.terminate();
-    this.worker = undefined;
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(new Error(reason));
+/**
+ * Vite が埋め込んだ shiori-worker のコード。埋め込みの Worker のコンストラクタは中身を blob: の URL にして new Worker に渡すので、
+ * その間だけ Worker を差し替えて URL を受け取り、中身を読む
+ */
+async function workerCode(): Promise<string> {
+  const Real = self.Worker;
+  let src = '';
+  class Capture {
+    constructor(url: string | URL) {
+      src = String(url);
     }
-    this.pending.clear();
+    addEventListener(): void {}
+    terminate(): void {}
   }
-
-  private call(msg: WithoutId<ToWorker>, timeout: number): Promise<string | undefined> {
-    const worker = this.worker;
-    if (!worker) return Promise.reject(new Error('SHIORI is not loaded'));
-    const id = ++this.seq;
-    return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`SHIORI ${msg.type} timed out`));
-      }, timeout);
-      this.pending.set(id, { resolve, reject, timer });
-      worker.postMessage({ ...msg, id } as ToWorker);
-    });
+  (self as unknown as { Worker: unknown }).Worker = Capture;
+  try {
+    new ShioriWorker();
+  } finally {
+    self.Worker = Real;
   }
+  if (src.startsWith('data:')) return decodeURIComponent(src.slice(src.indexOf(',') + 1));
+  try {
+    return await (await fetch(src)).text();
+  } finally {
+    URL.revokeObjectURL(src);
+  }
+}
 
-  private onMessage(msg: FromWorker): void {
-    if (msg.type === 'write') {
-      this.hooks.onWrite(`ghost/master/${msg.path}`, msg.data);
+/** data: の URL から Worker を起こし、返事が来るか試す (1度だけ) */
+function dataWorkerWorks(): Promise<boolean> {
+  return new Promise((resolve) => {
+    let w: Worker;
+    try {
+      w = new Worker('data:text/javascript,postMessage(typeof indexedDB)');
+    } catch {
+      resolve(false);
       return;
     }
-    if (msg.type === 'log') {
-      this.hooks.onLog(msg.message);
-      return;
-    }
-    const p = this.pending.get(msg.id);
-    if (!p) return;
-    this.pending.delete(msg.id);
-    clearTimeout(p.timer);
-    if (msg.ok) p.resolve(msg.value);
-    else p.reject(new Error(msg.error));
-  }
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      w.terminate();
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => done(false), 3000);
+    w.onmessage = () => done(true);
+    w.onerror = () => done(false);
+  });
 }

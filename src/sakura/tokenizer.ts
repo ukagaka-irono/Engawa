@@ -16,8 +16,8 @@ const BRACKET = new Set([
 
 /** %変数 (長いものから照合する) */
 const ENV_NAMES = [
-  'screenheight', 'screenwidth', 'lastghostname', 'selfname2', 'selfname', 'keroname', 'username',
-  'wronghour', 'minute', 'second', 'month', 'hour', 'day', 'exh', 'et', 'ms', 'mz', 'ml', 'mc', 'mh', 'mt', 'me', 'mp', 'm?', 'dms',
+  'lastobjectname', 'screenheight', 'screenwidth', 'lastghostname', 'selfname2', 'selfname', 'keroname', 'username',
+  'wronghour', 'minute', 'second', 'month', 'hour', 'day', 'exh', 'et', 'ms', 'mz', 'ml', 'mc', 'mh', 'mt', 'me', 'mp', 'm?', 'dms', '*',
 ];
 
 function parseBracket(s: string, start: number): { args: string[]; end: number } {

@@ -102,6 +102,7 @@
   --balloon-anchor: #0000ee;
   --balloon-cursor-bg: #316ac5;
   --balloon-cursor-text: #ffffff;
+  --balloon-disabled: #9a9a9a;
   --balloon-focus: #0078d7;
   --balloon-shadow: 2px 2px 3px rgba(0, 0, 0, 0.25);
   --balloon-radius: 8px;
@@ -123,10 +124,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* キャラクターの上ではキャラクターを触れることを示す (下の文書の文字カーソルより優先) */
+/*
+ * キャラクターの上ではキャラクターを触れることを示す (下の文書の文字カーソルより優先)。
+ * 当たり判定ごとのカーソル (surfaces.txt の cursor ブレス) はゴーストが --engawa-cursor に入れる
+ */
 html.over-character,
 html.over-character * {
-  cursor: pointer !important;
+  cursor: var(--engawa-cursor, pointer) !important;
 }
 
 /* 枠線や輪の太さ・間隔 (1〜2px) は余白ではないので、4px の刻みには乗せない */
@@ -176,17 +180,19 @@ html.over-character * {
   bottom: calc(var(--taskbar-height) + env(safe-area-inset-bottom));
   left: 0;
   overflow: hidden;
+  isolation: isolate;
   pointer-events: none;
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
+/* 重なりの順 (キャラクター 10〜、バルーン 50〜、常に手前 +100) はゴーストが \![set,zorder] に合わせて付け直す */
 .character {
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 1;
+  z-index: 10;
   will-change: transform;
 }
 
@@ -196,7 +202,7 @@ html.over-character * {
 }
 
 .character.dragging {
-  z-index: 3;
+  z-index: 300 !important;
 }
 
 /* ------------------------------------------------------------------ バルーン */
@@ -206,11 +212,12 @@ html.over-character * {
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 2;
+  z-index: 50;
   pointer-events: auto;
   font-family: var(--b-font);
   font-size: var(--b-size);
   font-weight: var(--b-weight);
+  font-style: var(--b-style, normal);
   color: var(--b-color);
 }
 
@@ -272,9 +279,59 @@ html.over-character * {
   overflow-wrap: anywhere;
   word-break: break-all;
   white-space: pre-wrap;
+  text-decoration: var(--b-decoration, none);
+  text-shadow: var(--b-shadow, none);
+  -webkit-text-stroke: var(--b-stroke, 0);
+  -webkit-text-fill-color: var(--b-fill, currentColor);
   user-select: text;
   -webkit-user-select: text;
   touch-action: pan-y;
+}
+
+/* \![lock,balloonrepaint] の間に書いたもの (解くまで見せない) */
+.balloon .pending {
+  visibility: hidden;
+}
+
+/* 矢印・マーカー・番号など、文字の上に重ねる部品 */
+.balloon-decor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.balloon-part,
+.balloon-image-fixed {
+  position: absolute;
+}
+
+/* 画像の無いバルーンの印 (矢印・クリック待ち・オンライン・SSTP) */
+.balloon-glyph {
+  position: absolute;
+  font-size: calc(var(--b-size) * 0.85);
+  line-height: 1;
+  color: var(--b-color);
+  opacity: 0.7;
+}
+
+.balloon-sstp-message,
+.balloon-number {
+  position: absolute;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: calc(var(--b-size) * 0.85);
+}
+
+/* 縦書きのバルーン (descript の vertical,1)。行は右から左へ進み、横にスクロールする */
+.balloon.vertical .balloon-text {
+  writing-mode: vertical-rl;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .balloon-text::-webkit-scrollbar {
@@ -305,33 +362,51 @@ html.over-character * {
   z-index: 1;
 }
 
+/*
+ * 選択肢・アンカーのマーカー。data-sel が選んでいるとき、data-rest がそれ以外の形 (square・underline、空白区切り)。
+ * 色は要素の CSS 変数 (--sel-* / --rest-*) で、バルーンの設定と \f[cursor*] などから決まる (balloon-view.ts)
+ */
 .balloon .choice,
 .balloon .anchor {
   cursor: pointer;
   border-radius: 0;
   text-decoration: none;
+  color: var(--rest-font, inherit);
 }
 
-.balloon .anchor {
-  color: var(--b-anchor);
+.balloon [data-rest~='square'] {
+  background: var(--rest-bg);
+  box-shadow: inset 0 0 0 1px var(--rest-pen);
+}
+
+.balloon [data-rest~='underline'] {
   text-decoration: underline;
+  text-decoration-color: var(--rest-pen);
 }
 
-.balloon .choice {
-  color: inherit;
+.balloon .choice:hover,
+.balloon .choice:focus,
+.balloon .anchor:hover,
+.balloon .anchor:focus {
+  color: var(--sel-font, inherit);
 }
 
-/* 選択肢のカーソルはスキンの指定どおり。キーボードのフォーカスはそれに点線を足す */
-.balloon[data-cursor='square'] .choice:hover,
-.balloon[data-cursor='square'] .choice:focus {
-  background: var(--b-cursor-bg);
-  color: var(--b-cursor-color);
+.balloon [data-sel~='square']:hover,
+.balloon [data-sel~='square']:focus {
+  background: var(--sel-bg);
+  box-shadow: inset 0 0 0 1px var(--sel-pen);
 }
 
-.balloon[data-cursor='underline'] .choice:hover,
-.balloon[data-cursor='underline'] .choice:focus {
+.balloon [data-sel~='underline']:hover,
+.balloon [data-sel~='underline']:focus {
   text-decoration: underline;
-  color: var(--b-cursor-color);
+  text-decoration-color: var(--sel-pen);
+}
+
+.balloon [data-sel='none']:hover,
+.balloon [data-sel='none']:focus {
+  background: none;
+  box-shadow: none;
 }
 
 .balloon .choice:focus-visible {
@@ -945,6 +1020,14 @@ html.over-character * {
   border: 1px solid var(--rule);
 }
 
+.license-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .doc pre code {
   padding: 0;
   background: none;
@@ -1029,4 +1112,188 @@ html.over-character * {
 .toast .btn-icon {
   min-height: var(--control-height);
   min-width: var(--titlebar-button);
+}
+
+/* オプションのページごとのヘルプ (?) */
+.section-help {
+  margin-left: var(--space-2);
+  min-height: 0;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------ 矩形選択モード (\![enter,selectmode]) */
+
+.select-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 250;
+  pointer-events: auto;
+  cursor: crosshair;
+  outline: 1px dashed var(--accent);
+}
+
+.select-box {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(0, 120, 215, 0.15);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ ツールチップ (当たり判定・選択肢) */
+
+.engawa-tooltip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 400;
+  max-width: 320px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--window-frame);
+  background: var(--window);
+  color: var(--window-text);
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading);
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ 入力ボックスの種類 */
+
+.text-area {
+  min-height: calc(var(--control-height) * 4);
+  padding: var(--space-1);
+  resize: vertical;
+}
+
+.slider-input {
+  width: 100%;
+}
+
+.slider-value {
+  display: block;
+  margin-top: var(--space-1);
+  text-align: center;
+}
+
+.ip-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.ip-part {
+  width: 4.5em;
+}
+
+.check-input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ 通知 (トレイのバルーン) */
+
+.toast-title {
+  font-weight: var(--weight-bold);
+}
+
+.toast-clickable {
+  cursor: pointer;
+}
+
+.tray-button {
+  position: relative;
+}
+
+.tray-ghost-icon {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  image-rendering: pixelated;
+}
+
+/* ------------------------------------------------------------------ 道具 (開発用パレット・使用率など) */
+
+.panel-dialog {
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+}
+
+.panel-dialog .dialog-body {
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+}
+
+.tool-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tool-stack > .btn {
+  align-self: flex-start;
+}
+
+.tool-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tool-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tool-table th,
+.tool-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--field-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.usage-cell {
+  width: 40%;
+}
+
+.usage-bar {
+  display: inline-block;
+  height: 8px;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.surface-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: var(--space-1);
+}
+
+.tool-output {
+  min-height: calc(var(--control-height) * 3);
+}
+
+.tool-picture,
+.ai-graph {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
 }

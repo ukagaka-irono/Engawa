@@ -18,8 +18,15 @@ export function uniqueId(prefix: string): string {
   return `${prefix}-${++idSeq}`;
 }
 
+let tokenRoot: Element | undefined;
+
+/** トークンを読む要素 (既定は :root)。よそのページに埋め込むときは、トークンを持つ Engawa の入れ物にする */
+export function setTokenRoot(root: Element): void {
+  tokenRoot = root;
+}
+
 /** styles.css の :root にある長さのトークン (px) を数値で読む。JS で位置を計算するとき用。 */
 export function tokenPx(name: string, fallback: number): number {
-  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  const v = parseFloat(getComputedStyle(tokenRoot ?? document.documentElement).getPropertyValue(name));
   return Number.isFinite(v) ? v : fallback;
 }

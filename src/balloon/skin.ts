@@ -11,15 +11,54 @@ export interface TextRect {
   bottom: number;
 }
 
+/** 選択肢・アンカーのマーカーの見た目 (cursor.* / anchor.* と \f[cursor*] など)。style は square・underline を空白区切りで */
+export interface MarkerLook {
+  style: string;
+  /** 矩形の中の色 (brush) */
+  bg: string;
+  /** 矩形の枠と下線の色 (pen) */
+  pen: string;
+  /** 文字の色 */
+  font: string;
+}
+
+export interface MarkerLooks {
+  /** 選択中の選択肢 (cursor.*) */
+  cursor: MarkerLook;
+  /** 選択していない選択肢 (cursor.notselect.*) */
+  cursorNot: MarkerLook;
+  /** 選択中のアンカー (anchor.*) */
+  anchor: MarkerLook;
+  /** 選択していないアンカー (anchor.notselect.*) */
+  anchorNot: MarkerLook;
+  /** 選んだことのあるアンカー (anchor.visited.*) */
+  anchorVisited: MarkerLook;
+}
+
 export interface BalloonStyle {
   fontFamily: string;
   fontSize: number;
   fontBold: boolean;
+  fontItalic: boolean;
+  fontUnderline: boolean;
+  fontStrike: boolean;
+  /** 白抜き (font.outline) */
+  fontOutline: boolean;
   color: string;
+  /** 陰落ちの色。無ければ undefined (既定は none) */
+  shadowColor?: string;
+  shadowStyle: 'offset' | 'outline';
+  /** 無効な文字 (\f[disable]、disable.font.color) */
+  disableColor: string;
   anchorColor: string;
-  cursorBackground: string;
-  cursorColor: string;
-  cursorStyle: 'square' | 'underline' | 'none';
+  markers: MarkerLooks;
+}
+
+/** バルーンに重ねる小さな画像と、その位置 (arrow0.x など。負の値は右端・下端から) */
+export interface BalloonPart {
+  image: Bitmap;
+  x: number;
+  y: number;
 }
 
 const BUILTIN_SIZE: Record<BalloonKind, [number, number]> = { s: [280, 164], k: [224, 132] };
@@ -28,6 +67,14 @@ const BUILTIN_SIZE: Record<BalloonKind, [number, number]> = { s: [280, 164], k: 
 function edge(value: number | undefined, size: number, fallback: number): number {
   const v = value ?? fallback;
   return v < 0 ? size + v : v;
+}
+
+/** 形状指定 (square / underline / square+underline / none) を、CSS の属性値 (空白区切り) にする */
+export function markerStyle(value: string | undefined, fallback: string): string {
+  const v = (value ?? '').trim().toLowerCase();
+  if (!v || v === 'default') return fallback;
+  const parts = v.split('+').filter((p) => p === 'square' || p === 'underline');
+  return parts.length ? parts.join(' ') : 'none';
 }
 
 /**
@@ -42,10 +89,12 @@ export class BalloonSkin {
     readonly descript: Descript,
     private readonly images: Map<string, Bitmap>,
     private readonly perImage: Map<string, Descript>,
+    /** バルーン画像以外の画像 (矢印・マーカーなど)。拡張子を除いた小文字のファイル名で引く */
+    private readonly parts: Map<string, Bitmap>,
   ) {}
 
   static builtin(): BalloonSkin {
-    return new BalloonSkin(null, '内蔵バルーン', new Descript(), new Map(), new Map());
+    return new BalloonSkin(null, '内蔵バルーン', new Descript(), new Map(), new Map(), new Map());
   }
 
   static async load(key: string, files: FileTree): Promise<BalloonSkin> {
@@ -54,6 +103,7 @@ export class BalloonSkin {
     const alpha = parseAlphaMode(descript.get('use_self_alpha'));
     const images = new Map<string, Bitmap>();
     const perImage = new Map<string, Descript>();
+    const parts = new Map<string, Bitmap>();
     await Promise.all(
       files.list().map(async (path) => {
         const settings = /^balloon([sk])(\d+)s\.txt$/.exec(path);
@@ -62,20 +112,28 @@ export class BalloonSkin {
           return;
         }
         const m = /^balloon([sk])(\d+)\.png$/.exec(path);
-        if (!m) return;
-        const pna = files.get(path.replace(/\.png$/, '.pna'));
+        const part = /^([^/]+)\.png$/i.exec(path);
+        if (!m && !part) return;
+        const pna = files.get(path.replace(/\.png$/i, '.pna'));
         try {
-          images.set(m[1] + m[2], await loadTransparentImage(files.get(path)!, pna, alpha));
+          const img = await loadTransparentImage(files.get(path)!, pna, alpha);
+          if (m) images.set(m[1] + m[2], img);
+          else parts.set(part![1].toLowerCase(), img);
         } catch (e) {
           console.warn(`[balloon] ${path}:`, e);
         }
       }),
     );
-    return new BalloonSkin(key, descript.str('name', key), descript, images, perImage);
+    return new BalloonSkin(key, descript.str('name', key), descript, images, perImage, parts);
   }
 
   get isBuiltin(): boolean {
     return this.images.size === 0;
+  }
+
+  /** その種類のバルーン画像の数 */
+  count(kind: BalloonKind): number {
+    return Math.max(1, [...this.images.keys()].filter((k) => k[0] === kind).length);
   }
 
   /**
@@ -101,7 +159,7 @@ export class BalloonSkin {
   }
 
   /** その画像に効く設定値 (画像ごとの設定 → descript.txt) */
-  private value(kind: BalloonKind, id: number, rightSide: boolean, name: string): string | undefined {
+  value(kind: BalloonKind, id: number, rightSide: boolean, name: string): string | undefined {
     const k = this.imageKey(kind, id, rightSide);
     return (k ? this.perImage.get(k)?.get(name) : undefined) ?? this.descript.get(name);
   }
@@ -113,15 +171,32 @@ export class BalloonSkin {
     return Number.isFinite(n) ? n : undefined;
   }
 
+  /** prefix.r / .g / .b の色。どれかが none なら 'none'、無ければ fallback */
   private rgb(kind: BalloonKind, id: number, rightSide: boolean, prefix: string, fallback: string): string {
+    const raw = ['r', 'g', 'b'].map((c) => this.value(kind, id, rightSide, `${prefix}.${c}`));
+    if (raw.some((v) => v?.trim().toLowerCase() === 'none')) return 'none';
     const [r, g, b] = ['r', 'g', 'b'].map((c) => this.num(kind, id, rightSide, `${prefix}.${c}`));
     if (r === undefined || g === undefined || b === undefined) return fallback;
     return `rgb(${r}, ${g}, ${b})`;
   }
 
+  /** 縦書きのバルーン (descript の vertical,1) */
+  vertical(kind: BalloonKind, id: number, rightSide: boolean): boolean {
+    return this.value(kind, id, rightSide, 'vertical')?.trim() === '1';
+  }
+
   textRect(kind: BalloonKind, id: number, rightSide: boolean, width: number, height: number): TextRect {
     if (this.isBuiltin) return { left: 16, top: 14, right: width - 16, bottom: height - 14 };
     const num = (name: string) => this.num(kind, id, rightSide, name);
+    // 縦書きでは origin.x が1列目の右端、折り返しは wordwrappoint.y
+    if (this.vertical(kind, id, rightSide)) {
+      return {
+        left: edge(num('validrect.left'), width, 10),
+        top: edge(num('origin.y') ?? num('validrect.top'), height, 10),
+        right: edge(num('origin.x') ?? num('validrect.right'), width, -10),
+        bottom: edge(num('wordwrappoint.y') ?? num('validrect.bottom'), height, -10),
+      };
+    }
     return {
       left: edge(num('origin.x') ?? num('validrect.left'), width, 10),
       top: edge(num('origin.y') ?? num('validrect.top'), height, 10),
@@ -130,19 +205,65 @@ export class BalloonSkin {
     };
   }
 
+  /**
+   * バルーンの部品の画像 (矢印・マーカーなど)。名前ごとの個別の画像 (markers / markerk) があればそれ。
+   * nameKey は descript.txt で名前を変える項目 (marker.filename など)、fallback はその既定の名前。
+   */
+  partImage(kind: BalloonKind, nameKey: string, fallback: string, suffix = ''): Bitmap | undefined {
+    const base = (this.descript.get(nameKey) ?? fallback).trim().toLowerCase().replace(/\.png$/, '');
+    return this.parts.get(`${base}${kind}${suffix}`) ?? this.parts.get(`${base}${suffix}`);
+  }
+
+  /** 部品の位置 (prefix.x / prefix.y)。どちらかが無ければ undefined */
+  partPoint(kind: BalloonKind, id: number, rightSide: boolean, prefix: string, width: number, height: number): { x: number; y: number } | undefined {
+    const x = this.num(kind, id, rightSide, `${prefix}.x`);
+    const y = this.num(kind, id, rightSide, `${prefix}.y`);
+    if (x === undefined || y === undefined) return undefined;
+    return { x: edge(x, width, 0), y: edge(y, height, 0) };
+  }
+
+  /** 部品の右端・下端の位置 (number.xr / sstpmessage.xr など、負の値は右端・下端から) */
+  partEdge(kind: BalloonKind, id: number, rightSide: boolean, name: string, size: number): number | undefined {
+    const v = this.num(kind, id, rightSide, name);
+    return v === undefined ? undefined : edge(v, size, 0);
+  }
+
   style(kind: BalloonKind, id: number, rightSide: boolean): BalloonStyle {
     const value = (name: string) => this.value(kind, id, rightSide, name);
+    const flag = (name: string) => value(name)?.trim() === '1';
+    const rgb = (prefix: string, fallback: string) => this.rgb(kind, id, rightSide, prefix, fallback);
     const font = value('font.name');
-    const cursor = value('cursor.style') ?? '';
+    const color = rgb('font.color', 'var(--balloon-text)');
+    const shadow = rgb('font.shadowcolor', 'none');
+    const look = (prefix: string, fallback: MarkerLook): MarkerLook => ({
+      style: markerStyle(value(`${prefix}.style`), fallback.style),
+      bg: rgb(`${prefix}.brush.color`, fallback.bg),
+      pen: rgb(`${prefix}.pen.color`, fallback.pen),
+      font: rgb(`${prefix}.font.color`, fallback.font),
+    });
+    const anchorColor = rgb('anchor.font.color', 'var(--balloon-anchor)');
+    const cursor = look('cursor', { style: 'square', bg: 'var(--balloon-cursor-bg)', pen: 'var(--balloon-cursor-bg)', font: 'var(--balloon-cursor-text)' });
+    const anchorNot = look('anchor.notselect', { style: 'underline', bg: 'transparent', pen: 'currentColor', font: anchorColor });
     return {
-      fontFamily: font ? `"${font.replace(/"/g, '')}", var(--font-balloon)` : 'var(--font-balloon)',
+      fontFamily: font ? `${font.split(',').map((f) => `"${f.trim().replace(/"/g, '')}"`).join(', ')}, var(--font-balloon)` : 'var(--font-balloon)',
       fontSize: this.num(kind, id, rightSide, 'font.height') ?? 12,
-      fontBold: value('font.bold') === '1',
-      color: this.rgb(kind, id, rightSide, 'font.color', 'var(--balloon-text)'),
-      anchorColor: this.rgb(kind, id, rightSide, 'anchor.font.color', 'var(--balloon-anchor)'),
-      cursorBackground: this.rgb(kind, id, rightSide, 'cursor.brush.color', 'var(--balloon-cursor-bg)'),
-      cursorColor: this.rgb(kind, id, rightSide, 'cursor.font.color', 'var(--balloon-cursor-text)'),
-      cursorStyle: (['square', 'underline', 'none'].includes(cursor) ? cursor : 'square') as BalloonStyle['cursorStyle'],
+      fontBold: flag('font.bold'),
+      fontItalic: flag('font.italic'),
+      fontUnderline: flag('font.underline'),
+      fontStrike: flag('font.strike'),
+      fontOutline: flag('font.outline'),
+      color,
+      shadowColor: shadow === 'none' ? undefined : shadow,
+      shadowStyle: value('font.shadowstyle')?.trim().toLowerCase() === 'outline' ? 'outline' : 'offset',
+      disableColor: rgb('disable.font.color', 'var(--balloon-disabled)'),
+      anchorColor,
+      markers: {
+        cursor,
+        cursorNot: look('cursor.notselect', { style: 'none', bg: 'transparent', pen: 'currentColor', font: 'inherit' }),
+        anchor: look('anchor', { style: 'underline', bg: 'transparent', pen: 'currentColor', font: anchorColor }),
+        anchorNot,
+        anchorVisited: look('anchor.visited', anchorNot),
+      },
     };
   }
 }

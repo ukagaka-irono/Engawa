@@ -5,6 +5,7 @@
 import { decodeText, encodeText } from '../util/text';
 import { normalizePath } from '../vfs/files';
 import { runModuleScript } from './module-script';
+import { startNode } from './node-runtime';
 import type { FromWorker, ToWorker } from './worker-protocol';
 
 // globalThis は Safari 12.1 から。SHIORI が globalThis.engawa と書けるように
@@ -80,13 +81,116 @@ const host = {
 };
 (self as unknown as { engawa: typeof host }).engawa = host;
 
+/** SSTP の答えを待っているもの (Node.js のプログラムの SSTP over HTTP) */
+const sstpWaiting = new Map<number, (response: string) => void>();
+let sstpSeq = 0;
+
+/** Node.js のプログラムの答えを待つ長さ (メインスレッドの SHIORI の待ち時間と同じ) */
+const NODE_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * SHIOLINK で動かす Node.js のプログラムを、SHIORI と同じ形にする。
+ * 要求は1つずつ「*S:番号」の後に送り、プログラムが「*S:番号」を返した後の、空行までを応答とする。
+ * 待っていない番号の答え (時間切れの後に来たものなど) は捨てる
+ */
+function nodeShiori(argv: string[]): ShioriModule {
+  let out = '';
+  let current: { id: string; resolve(text: string): void } | undefined;
+  const drain = () => {
+    for (;;) {
+      const start = out.indexOf('*S:');
+      if (start < 0) {
+        // 「*S:」の途中で切れているかもしれないところだけ残す
+        out = out.endsWith('*S') ? '*S' : out.endsWith('*') ? '*' : '';
+        return;
+      }
+      out = out.slice(start);
+      const head = /^\*S:([^\r\n]*)\r\n/.exec(out);
+      if (!head) return;
+      const rest = out.slice(head[0].length);
+      const end = rest.indexOf('\r\n\r\n');
+      if (end < 0) return;
+      out = rest.slice(end + 4);
+      if (current?.id === head[1]) {
+        const done = current;
+        current = undefined;
+        done.resolve(rest.slice(0, end + 4));
+      }
+    }
+  };
+  const node = startNode(
+    {
+      files,
+      stdout: (t) => {
+        out += t;
+        drain();
+      },
+      stderr: (t) => ctx.postMessage({ type: 'log', message: t.trimEnd() }),
+      write: (path, data) => ctx.postMessage({ type: 'write', path, data }),
+      sstp: (request) =>
+        new Promise((resolve) => {
+          const id = ++sstpSeq;
+          sstpWaiting.set(id, resolve);
+          ctx.postMessage({ type: 'sstp', id, request });
+        }),
+    },
+    argv,
+    { globals: true },
+  );
+  let seq = 0;
+  let chain: Promise<unknown> = Promise.resolve();
+  return {
+    load(dir) {
+      node.stdin(`*L:/${dir}\r\n`);
+    },
+    request(text) {
+      const run = () =>
+        new Promise<string>((resolve) => {
+          const id = `${++seq}`;
+          const timer = setTimeout(() => {
+            if (current?.id !== id) return;
+            current = undefined;
+            resolve('');
+          }, NODE_REQUEST_TIMEOUT_MS);
+          current = {
+            id,
+            resolve: (t) => {
+              clearTimeout(timer);
+              resolve(t);
+            },
+          };
+          node.stdin(`*S:${id}\r\n${text.endsWith('\r\n\r\n') ? text : `${text.replace(/(\r\n)*$/, '')}\r\n\r\n`}`);
+        });
+      // SHIOLINK は1つずつ (前の答えが来るか、時間切れになってから次を送る)
+      const p = chain.then(run, run);
+      chain = p.catch(() => undefined);
+      return p;
+    },
+    unload() {
+      node.stdin('*U:\r\n');
+      node.exit();
+    },
+  };
+}
+
 ctx.onmessage = async (e) => {
   const msg = e.data;
+  if (msg.type === 'sstp-response') {
+    sstpWaiting.get(msg.id)?.(msg.response);
+    sstpWaiting.delete(msg.id);
+    return;
+  }
   try {
     let value: string | undefined;
     switch (msg.type) {
       case 'load': {
         for (const [p, d] of msg.files) files.set(p, d);
+        if (msg.node) {
+          const mod = nodeShiori(msg.node.argv);
+          await mod.load?.('');
+          shiori = mod;
+          break;
+        }
         const mod = (await importModule(msg.entry)) as ShioriModule;
         if (typeof mod.request !== 'function') throw new Error(`${msg.entry} does not export request()`);
         // load() が終わるまでは request を受け付けない
@@ -97,6 +201,9 @@ ctx.onmessage = async (e) => {
       case 'request':
         if (!shiori) throw new Error('SHIORI is not loaded');
         value = String(await shiori.request(msg.text));
+        break;
+      case 'put':
+        files.set(normalizePath(msg.path), msg.data);
         break;
       case 'unload':
         await shiori?.unload?.();

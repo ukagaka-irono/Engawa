@@ -28,7 +28,7 @@ const { SurfaceRenderer } = await import('../src/shell/renderer');
 
 /** 指定した ID だけを持つシェル。broken の ID は「定義はあるが読めない」、delay は読み込みの遅さ (ms) */
 function fakeShell(name: string, ids: number[], opts: { broken?: number[]; delay?: number } = {}): Shell {
-  const surfaces: SurfacesFile = { surfaces: new Map(), aliases: new Map(), version: 1 };
+  const surfaces: SurfacesFile = { surfaces: new Map(), aliases: new Map(), version: 1, cursors: new Map(), tooltips: new Map(), collisionSort: 'none', animationSort: 'descend' };
   const ready = new Map<number, { canvas: FakeCanvas } | null>();
   const known = new Set([...ids, ...(opts.broken ?? [])]);
   const compose = (id: number) =>

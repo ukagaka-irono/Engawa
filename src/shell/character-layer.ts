@@ -24,6 +24,10 @@ export class CharacterLayer {
   /** 長押しでメニューを開いた時刻 (続けて届くブラウザの contextmenu を無視するため) */
   private longPressAt = 0;
   private lastTap?: { view: CharacterView; x: number; y: number; at: number };
+  /** 右ドラッグのジェスチャー中のキャラクター */
+  private gesturing?: { view: CharacterView; pointerId: number };
+  /** ジェスチャーを終えた時刻 (続いて来る contextmenu でメニューを出さない) */
+  private gestureAt = 0;
   /** 最後にタッチで触った時刻 (タッチから作られた dblclick を二重に扱わないため) */
   private touchedAt = 0;
 
@@ -53,7 +57,7 @@ export class CharacterLayer {
    * (広い画面では、本文の列の外にいるキャラクターの下は <main> や <body> になる)。
    */
   private onDesktop(target: EventTarget | null): boolean {
-    return target instanceof Element && target.closest('.balloon, .overlay, dialog, .backdrop, ._dialog_overlay') === null;
+    return target instanceof Element && target.closest('.balloon, .overlay, .select-overlay, dialog, .backdrop, ._dialog_overlay') === null;
   }
 
   /** その位置で一番上にある、不透明なピクセルを持つキャラクター */
@@ -61,11 +65,9 @@ export class CharacterLayer {
     const dragging = this.active?.view;
     if (dragging?.hit(e.clientX, e.clientY)) return dragging;
     if (!this.onDesktop(e.target)) return undefined;
-    // 後から追加したものほど上に描かれる
-    for (let i = this.views.length - 1; i >= 0; i--) {
-      if (this.views[i].hit(e.clientX, e.clientY)) return this.views[i];
-    }
-    return undefined;
+    // 描かれている順 (\![set,zorder] などの z-index が大きいものが上。同じなら後から追加したものが上) に調べる
+    const order = this.views.map((view, i) => ({ view, i, z: Number(view.el.style.zIndex) || 0 })).sort((a, b) => b.z - a.z || b.i - a.i);
+    return order.find(({ view }) => view.hit(e.clientX, e.clientY))?.view;
   }
 
   private setHovered(view: CharacterView | undefined, e: PointerInput): void {
@@ -86,6 +88,7 @@ export class CharacterLayer {
     ev.preventDefault();
     if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.page')) document.activeElement.blur();
     view.pointerDown(input);
+    if (input.button === 2) this.gesturing = { view, pointerId: input.pointerId };
     if (input.pointerType === 'touch') {
       this.touchedAt = Date.now();
       this.startLongPress(view, input);
@@ -99,6 +102,7 @@ export class CharacterLayer {
 
   private move(input: PointerInput): void {
     if (this.longPress && Math.hypot(input.clientX - this.longPress.x, input.clientY - this.longPress.y) > TOUCH_SLOP) this.cancelLongPress();
+    if (this.gesturing && this.gesturing.pointerId === input.pointerId) this.gesturing.view.gestureMove(input);
     if (this.active && this.active.pointerId === input.pointerId) {
       this.active.view.dragMove(input);
       return;
@@ -120,6 +124,13 @@ export class CharacterLayer {
     a.view.pointerUp(input, cancelled);
     if (tapped && input.pointerType === 'touch') this.tap(a.view, input);
     return true;
+  }
+
+  /** 右ボタンを放した。ジェスチャーだったら、続く contextmenu を出さない */
+  private endGesture(e: { clientX: number; clientY: number; button: number }): void {
+    const g = this.gesturing;
+    this.gesturing = undefined;
+    if (g?.view.gestureEnd(e)) this.gestureAt = Date.now();
   }
 
   /** 2回目のタップならダブルクリック */
@@ -186,8 +197,8 @@ export class CharacterLayer {
         this.onBalloonContextMenu(e);
         return;
       }
-      // 長押しで既に開いた (Android などはこの後にブラウザの contextmenu も来る)
-      if (Date.now() - this.longPressAt < 1000) {
+      // 長押しで既に開いた (Android などはこの後にブラウザの contextmenu も来る)。右ドラッグのジェスチャーの後も出さない
+      if (Date.now() - this.longPressAt < 1000 || Date.now() - this.gestureAt < 500) {
         e.preventDefault();
         return;
       }
@@ -231,9 +242,10 @@ export class CharacterLayer {
       if (root.hasPointerCapture(e.pointerId)) root.releasePointerCapture(e.pointerId);
     };
     document.addEventListener('pointerup', (e) => {
+      if (e.button === 2) this.endGesture(e);
       if (this.end(e, false, release(e))) return;
-      // 中ボタンのクリック (左はドラッグ扱いで上の end に、右は contextmenu に来る)
-      if (e.button === 1) this.pick(e)?.click(e);
+      // 中ボタン・戻る・進むのボタン (左はドラッグ扱いで上の end に、右は contextmenu に来る)
+      if (e.button === 1 || e.button === 3 || e.button === 4) this.pick(e)?.exUp(e);
     });
     document.addEventListener('pointercancel', (e) => void this.end(e, true, release(e)));
     root.addEventListener('pointerleave', (e) => {
@@ -264,8 +276,9 @@ export class CharacterLayer {
     document.addEventListener('mousedown', (e) => void this.down(mouse(e), e));
     document.addEventListener('mousemove', (e) => this.move(mouse(e)));
     document.addEventListener('mouseup', (e) => {
+      if (e.button === 2) this.endGesture(e);
       if (this.end(mouse(e), false)) return;
-      if (e.button === 1) this.pick(e)?.click(e);
+      if (e.button === 1 || e.button === 3 || e.button === 4) this.pick(e)?.exUp(e);
     });
     document.documentElement.addEventListener('mouseleave', (e) => {
       if (!this.active) this.setHovered(undefined, mouse(e));

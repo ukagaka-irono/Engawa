@@ -93,13 +93,24 @@ function guessName(name: string): string {
   }
 }
 
+/** 展開してよい大きさの合計 (ゴーストの .nar はふつう数十 MB まで) */
+export const MAX_UNZIPPED = 512 * 1024 * 1024;
+
 /**
  * .nar / .zip を展開する。
  * UTF-8 フラグのある名前はそのまま、無い名前はアーカイブ全体で UTF-8 として読めるなら UTF-8、
  * そうでなければ Shift_JIS として読む (伺かのアーカイブは Windows で作られたものが多い)。
  */
 export function filesFromZip(data: Uint8Array): FileTree {
-  const entries = unzipSync(data);
+  // 展開した大きさの合計を先に見て、大きすぎるもの (圧縮爆弾) は展開しない
+  let total = 0;
+  const entries = unzipSync(data, {
+    filter: (f) => {
+      total += f.originalSize;
+      if (total > MAX_UNZIPPED) throw new Error(`展開すると ${Math.round(MAX_UNZIPPED / 1024 / 1024)} MB を超えます`);
+      return true;
+    },
+  });
   const raw = readCentralNames(data);
   const names = new Map<string, string>();
   if (raw) {
@@ -119,8 +130,11 @@ export function filesFromZip(data: Uint8Array): FileTree {
   }
   const tree = new FileTree();
   for (const [key, bytes] of Object.entries(entries)) {
-    if (key.endsWith('/')) continue;
-    tree.set(names.get(key) ?? guessName(key), bytes);
+    // Windows の道具で作ったものには、区切りが \ のフォルダ (ghost\master\) もある。
+    // Shift_JIS の「ソ」などは2バイト目が \ なので、名前を読んでから見る
+    const name = names.get(key) ?? guessName(key);
+    if (/[/\\]$/.test(name)) continue;
+    tree.set(name, bytes);
   }
   return tree;
 }
