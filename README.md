@@ -81,16 +81,18 @@ Internet Explorer には対応していません。
 
 ブラウザでは Windows の DLL をそのまま実行できないので、各 SHIORI のソースを WebAssembly にしたものを `index.html` に組み込んでいます。
 ゴーストの `descript.txt` の `shiori` と、ゴーストが同梱している DLL の中身から、どれで動かすかを決めます (`shiori.dll` などに名前を変えてあっても分かります)。
+版によって動きが変わった SHIORI は、古い版も組み込んであり、同梱の DLL の版 (ファイルバージョンや DLL の中の版の文字列) で選びます。DLL を同梱していなければ最新の版で動かします。
 
 | SHIORI | DLL | ソース |
 |---|---|---|
 | YAYA | yaya.dll | [YAYA-shiori/yaya-shiori](https://github.com/YAYA-shiori/yaya-shiori) |
 | 文 (AYA5) | aya5.dll | [ponapalt/aya5-shiori](https://github.com/ponapalt/aya5-shiori) |
-| 里々 | satori.dll | [ukatech/satoriya-shiori](https://github.com/ukatech/satoriya-shiori) |
+| 里々 2.x (Unicode 版) | satori.dll | [ukatech/satoriya-shiori](https://github.com/ukatech/satoriya-shiori) (Mc206-4) |
+| 里々 1.x | satori.dll (ファイルバージョン 1.x) | [ukatech/satoriya-shiori](https://github.com/ukatech/satoriya-shiori) (Mc172-3。整備班より前の 里々 の DLL も 1.x として扱う) |
 | 華和梨 9 (8 の辞書もそのまま読める) | shiori.dll (kawarirc.kis) | [ukatech/kawari](https://github.com/ukatech/kawari) (Phase 9.2.0) |
 | 華和梨 7 | shiori.dll (kawari.ini)。SHIORI/2.x で話す | [kawari/kawari7](https://github.com/kawari/kawari7) |
 | なし栞 | nashi.dll | [yanashi-interface/nashi-shiori-studio](https://github.com/yanashi-interface/nashi-shiori-studio) |
-| minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) |
+| minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) (0.3.0。0.2.x・0.1.x の DLL のゴーストは、呼び出し元の let が見える 0.2.2 で動かす) |
 | pasta (Rust と Lua) | pasta.dll (pasta.toml) | [ekicyou/pasta](https://github.com/ekicyou/pasta) (LuaJIT の代わりに Lua 5.4 で動かす) |
 | emo (Rust と Lua 5.3。pasta の前身) | emo.dll | [ekicyou/emo-rs](https://github.com/ekicyou/emo-rs) (0.5.2) |
 | kagari (Lua 5.4。kotori を含む) | kagari.dll | [Tatakinov/kagari_shiori](https://github.com/Tatakinov/kagari_shiori) (ゴーストが同梱する C のモジュールのうち、LPeg は組み込み、lua-utf8・luachild・iconv・rand は作り直したものを使う) |
@@ -101,6 +103,8 @@ Internet Explorer には対応していません。
 - **下の表に無い SAORI と、プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
 - **.NET (dnproxy)・PowerShell (powershiori) の SHIORI** は、ブラウザで動く実行環境が無いので動きません。
 - **蒼空 (aosora)** は、ソースの使い方が個人利用に限られている (まだライセンスが決まっていない) ので組み込んでいません。
+- **ソースが公開されていない SHIORI** (文 ver.1〜4・美坂・偽栞・此栞・忍・似非shiori・ひとみ。・翡翠・結奈・真絵・透理・灯 など、主に 2001〜2005 年ごろのもの) は、WebAssembly にできないので動きません。
+- **別の言語の実行環境を呼ぶ SHIORI** (里珠 (Perl)・PIXY (PHP)・Ruby栞・phiori (Python)) は動きません。
 - kagari のゴーストが使う LuaSocket・Lua Lanes は読み込めますが、ソケットはつながらず、別のスレッドの処理 (lane) は動きません。
 - 実行ファイルの中にゴーストを書いた SHIORI (Go・Zig などで書いて DLL にしたもの、SHIOLINK から別のプログラムを呼ぶもの) は動きません。
 - pasta は LuaJIT の代わりに標準の Lua 5.4 で動かすので、LuaJIT にしか無いもの (`jit`・`ffi`・`bit`) を使う台本は動きません。

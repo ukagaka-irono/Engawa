@@ -1,6 +1,48 @@
 // WebAssembly にする SHIORI の一覧と、それぞれのビルド設定 (native/build.mjs が読む)。
 // commit を変えたら build.mjs で作り直し、src/assets/shiori/ の出来上がりも一緒にコミットする。
 
+/** minato (Rust 製) のビルド設定。版ごとに commit だけが違う */
+function minatoBuild() {
+  return {
+    licenses: [{ title: 'minato (MIT)', file: 'LICENSE' }],
+    repo: 'https://github.com/mizuki-yura/minato.git',
+    // ライブラリ (minato) だけを Emscripten 向けの静的ライブラリにする。
+    // Windows 専用の winapi (GlobalAlloc・LoadLibraryW) は native/shim/rust-winapi に差し替える
+    rust: { lib: 'minato', patch: { winapi: 'rust-winapi' } },
+    edits: {
+      // 構文チェッカーの GUI (eframe・wgpu) はビルドしない
+      'Cargo.toml': [['members = [".", "minato-checker-gui"]', 'members = ["."]']],
+      // スレッドを作れないので、16MB のスタックで動かしていたパーサーをそのまま呼ぶ (スタックはリンクの設定で 16MB にする)
+      'src/lib.rs': [
+        [
+          '    let main = main.to_path_buf();\n',
+          '    let main = main.to_path_buf();\n' +
+            '    #[cfg(target_os = "emscripten")]\n' +
+            '    {\n' +
+            '        let mut visited = HashSet::new();\n' +
+            '        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_program(&main, &mut visited))).unwrap_or_else(|_| {\n' +
+            '            Err(LoadError::PreprocessError(Diagnostic::error("パース中に内部エラーが発生しました。")))\n' +
+            '        });\n' +
+            '    }\n',
+        ],
+      ],
+      // SAORI もスレッドで呼んで時間切れを見ていたが、スレッドを作れないのでそのまま呼ぶ (SAORI は Worker の中で同期で答える)
+      'src/saori.rs': [
+        [
+          '    let (tx, rx) = mpsc::channel();\n',
+          '    #[cfg(target_os = "emscripten")]\n' +
+            '    {\n' +
+            '        let _ = timeout;\n' +
+            '        return Some(dll.request(&args));\n' +
+            '    }\n' +
+            '    let (tx, rx) = mpsc::channel();\n',
+        ],
+      ],
+    },
+    ldflags: ['-sSTACK_SIZE=16MB'],
+  };
+}
+
 export const ENGINES = [
   {
     name: 'yaya',
@@ -40,6 +82,64 @@ export const ENGINES = [
       ...['attribute', 'char_ref', 'char_ref_gperf', 'error', 'parser', 'string_buffer', 'string_piece', 'tag', 'tokenizer', 'utf8', 'util', 'vector'].map(
         (n) => `gumbo/src/${n}.c`,
       ),
+    ],
+  },
+  {
+    name: 'satori1',
+    label: '里々 1.x',
+    licenses: [{ title: '里々 (BSD 2-Clause)', file: 'satoriya/LICENSE.txt' }],
+    repo: 'https://github.com/ukatech/satoriya-shiori.git',
+    // Mc172-3 (1.x の最後、master)。2.x (Unicode 版) は文字数の数え方が変わり、全角の自動ウェイトが半分になる・calc の比較が変わる
+    // などがあるので、1.x の DLL を同梱しているゴーストにはこちらを使う (native-detect.ts が DLL の版で選ぶ)
+    commit: 'a574669478e6086d85f63beb6c52a31c7dcc43cf',
+    // satoriya/satori/makefile.emscripten と同じ。1.x は文字列を Shift_JIS のバイト列のまま扱うので、ソースは変換しない
+    // (clang は UTF-8 でない文字列リテラルもそのままのバイトで残す。2バイト目が \ の文字は、ソースの側で \x.. と書いてある)
+    includes: ['satoriya/satori', 'satoriya/_'],
+    defines: ['POSIX', 'SATORI_DLL'],
+    // 値を返さずに終わる関数は wasm では止まる (unreachable) ので、見逃さないようにエラーにする (下の edits で直したもの)
+    cxxflags: ['-std=c++11', '-Wno-invalid-utf8', '-Wno-everything', '-Werror=return-type'],
+    // _/charset.cpp は Windows の API で書かれているので入れず、使っている SJIStoUTF8 だけ native/shim に持つ
+    shims: ['satori1_charset.cpp'],
+    edits: {
+      // POSIX 版の SAORI の呼び出しは、応答を受け取っても返していない (値を返さずに関数の終わりに来るので、wasm では止まる)
+      'satoriya/satori/SakuraDLLClient.cpp': [['\t\tstring theResponse(static_cast<char*>(h), len);\n\t\tfree(h);\n', '\t\tstring theResponse(static_cast<char*>(h), len);\n\t\tfree(h);\n\t\treturn theResponse;\n']],
+      // ログ (標準エラー) は Shift_JIS のバイト列のままなので、UTF-8 にしてから書く (Engawa は UTF-8 として読む)
+      'satoriya/_/Sender.cpp': [
+        ['#include\t"Sender.h"\n', '#include\t"Sender.h"\n#include\t"charset.h"\n'],
+        ['fprintf(stderr, "%s", theBuf);', 'fprintf(stderr, "%s", SJIStoUTF8(theBuf).c_str());'],
+        ['std::cerr << "error - SATORI : " << *i << std::endl;', 'std::cerr << "error - SATORI : " << SJIStoUTF8(*i) << std::endl;'],
+        ['std::cerr << "error - SATORI : " << out << std::endl;', 'std::cerr << "error - SATORI : " << SJIStoUTF8(out) << std::endl;'],
+      ],
+      // ssu の lsimg も POSIX 版は中身が無く、値を返さない。2.x の POSIX 版 (opendir で画像の名前を集める) と同じにする
+      'satoriya/satori/ssu.cpp': [
+        ['#include\t<time.h>\n', '#include\t<time.h>\n#include\t<dirent.h>\n'],
+        [
+          '\treturn s;\n#else\n',
+          '\treturn s;\n#else\n' +
+            '\tDIR* dh = opendir(iArguments[0].c_str());\n' +
+            '\tif (dh == NULL)\n' +
+            '\t\treturn "0";\n' +
+            '\tstruct dirent* ent;\n' +
+            '\twhile ((ent = readdir(dh)) != NULL) {\n' +
+            '\t\tstring lo(ent->d_name);\n' +
+            '\t\tstd::transform(lo.begin(), lo.end(), lo.begin(), tolower);\n' +
+            '\t\tif (compare_tail(lo, ".png") || compare_tail(lo, ".jpg") || compare_tail(lo, ".jpe") || compare_tail(lo, ".jpeg") || compare_tail(lo, ".bmp"))\n' +
+            '\t\t\toValues.push_back(ent->d_name);\n' +
+            '\t}\n' +
+            '\tclosedir(dh);\n' +
+            '\tchar s[32];\n' +
+            '\tsprintf(s, "%d", (int)oValues.size());\n' +
+            '\treturn s;\n',
+        ],
+      ],
+    },
+    sources: [
+      ...['Sender', 'Utilities', 'calc', 'calc_float', 'stltool', 'random', 'mt19937ar'].map((n) => `satoriya/_/${n}.cpp`),
+      ...[
+        'SakuraCS', 'SakuraClient', 'SakuraDLLClient', 'SakuraDLLHost', 'SaoriClient', 'satori', 'satoriTranslate',
+        'satori_AnalyzeRequest', 'satori_CreateResponce', 'satori_EventOperation', 'satori_Kakko',
+        'satori_load_dict', 'satori_load_unload', 'satori_sentence', 'satori_tool', 'shiori_plugin', 'ssu',
+      ].map((n) => `satoriya/satori/${n}.cpp`),
     ],
   },
   {
@@ -186,43 +286,17 @@ export const ENGINES = [
   {
     name: 'minato',
     label: 'minato',
-    licenses: [{ title: 'minato (MIT)', file: 'LICENSE' }],
-    repo: 'https://github.com/mizuki-yura/minato.git',
+    // 0.3.0。0.3 から、呼んだ関数・トークから呼び出し元の let が見えなくなった (CHANGELOG.md)。
+    // それより前の DLL を同梱しているゴーストには、下の minato02 を使う (native-detect.ts が DLL の版で選ぶ)
+    commit: '80febc0b27a3bb189e6c1b7de36bee7d6f90d8ba',
+    ...minatoBuild(),
+  },
+  {
+    name: 'minato02',
+    label: 'minato 0.2',
+    // 0.2.2 (0.3 より前の最後)。0.1.x も、呼び出し元の let が見えるのは同じなのでこちらで動かす
     commit: '3b2d35af3d7e639e2df94c74582b89dad8f37ff1',
-    // Rust 製。ライブラリ (minato) だけを Emscripten 向けの静的ライブラリにする。
-    // Windows 専用の winapi (GlobalAlloc・LoadLibraryW) は native/shim/rust-winapi に差し替える
-    rust: { lib: 'minato', patch: { winapi: 'rust-winapi' } },
-    edits: {
-      // 構文チェッカーの GUI (eframe・wgpu) はビルドしない
-      'Cargo.toml': [['members = [".", "minato-checker-gui"]', 'members = ["."]']],
-      // スレッドを作れないので、16MB のスタックで動かしていたパーサーをそのまま呼ぶ (スタックはリンクの設定で 16MB にする)
-      'src/lib.rs': [
-        [
-          '    let main = main.to_path_buf();\n',
-          '    let main = main.to_path_buf();\n' +
-            '    #[cfg(target_os = "emscripten")]\n' +
-            '    {\n' +
-            '        let mut visited = HashSet::new();\n' +
-            '        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_program(&main, &mut visited))).unwrap_or_else(|_| {\n' +
-            '            Err(LoadError::PreprocessError(Diagnostic::error("パース中に内部エラーが発生しました。")))\n' +
-            '        });\n' +
-            '    }\n',
-        ],
-      ],
-      // SAORI もスレッドで呼んで時間切れを見ていたが、スレッドを作れないのでそのまま呼ぶ (SAORI は Worker の中で同期で答える)
-      'src/saori.rs': [
-        [
-          '    let (tx, rx) = mpsc::channel();\n',
-          '    #[cfg(target_os = "emscripten")]\n' +
-            '    {\n' +
-            '        let _ = timeout;\n' +
-            '        return Some(dll.request(&args));\n' +
-            '    }\n' +
-            '    let (tx, rx) = mpsc::channel();\n',
-        ],
-      ],
-    },
-    ldflags: ['-sSTACK_SIZE=16MB'],
+    ...minatoBuild(),
   },
   {
     name: 'pasta',

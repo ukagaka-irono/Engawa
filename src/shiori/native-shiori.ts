@@ -41,7 +41,7 @@ export class NativeShiori extends WorkerShiori implements Shiori {
     const wasm = new Uint8Array(await (await fetch(this.engine.wasmUrl)).arrayBuffer());
     const files = [...this.files.sub('ghost/master').entries()];
     // WebAssembly にした SAORI は、SHIORI が開く前に Worker の中で作っておく。里々は ssu.dll を自分の中のもので呼ぶ
-    const saori = await planWasmSaori(this.files, this.name, this.engine.id === 'satori' ? ['ssu'] : []);
+    const saori = await planWasmSaori(this.files, this.name, this.engine.id === 'satori' || this.engine.id === 'satori1' ? ['ssu'] : []);
     const shellDirs = this.files.dirs('shell');
     await this.start(new NativeWorker(), { type: 'load', engine: this.engine.id, wasm, files, env: readSaoriEnv(), saori, shellDirs } as never, [wasm.buffer]);
     document.addEventListener('visibilitychange', this.flushOnHide);

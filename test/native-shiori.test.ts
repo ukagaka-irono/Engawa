@@ -9,12 +9,16 @@ import createKagari from '../src/assets/shiori/kagari.mjs';
 import KAGARI_WASM from '../src/assets/shiori/kagari.wasm.gz?inline';
 import createMinato from '../src/assets/shiori/minato.mjs';
 import MINATO_WASM from '../src/assets/shiori/minato.wasm.gz?inline';
+import createMinato02 from '../src/assets/shiori/minato02.mjs';
+import MINATO02_WASM from '../src/assets/shiori/minato02.wasm.gz?inline';
 import createNashi from '../src/assets/shiori/nashi.mjs';
 import createQuickshiori from '../src/assets/shiori/quickshiori.mjs';
 import QUICKSHIORI_WASM from '../src/assets/shiori/quickshiori.wasm.gz?inline';
 import NASHI_WASM from '../src/assets/shiori/nashi.wasm.gz?inline';
 import createSatori from '../src/assets/shiori/satori.mjs';
 import SATORI_WASM from '../src/assets/shiori/satori.wasm.gz?inline';
+import createSatori1 from '../src/assets/shiori/satori1.mjs';
+import SATORI1_WASM from '../src/assets/shiori/satori1.wasm.gz?inline';
 import createYaya from '../src/assets/shiori/yaya.mjs';
 import YAYA_WASM from '../src/assets/shiori/yaya.wasm.gz?inline';
 import { buildRequest } from '../src/shiori/protocol';
@@ -135,6 +139,22 @@ describe('里々 (WebAssembly)', () => {
   });
 });
 
+describe('里々 1.x (WebAssembly、Shift_JIS のバイト列のまま組んだもの)', () => {
+  it('Shift_JIS の辞書で SHIORI/3.0 に答え、セーブデータを読み戻す', async () => {
+    const s = await boot(createSatori1, SATORI1_WASM, {
+      'dic_test.txt': sjis(['＊OnBoot', '：こんにちは①、（calc、1＋2＊3）。', '', '＊OnSet', '＄回数＝（Reference0）', '：', '', '＊OnGet', '：回数は（回数）', ''].join('\n')),
+    });
+    expect(s.loaded).toBe(1);
+    // 1.x は Value を Charset より前に返す (2.x と逆。ここで 1.x のビルドが動いていると分かる)
+    expect(s.get('OnBoot', 'Shift_JIS', ['master'])).toBe('SHIORI/3.0 200 OK\r\nValue: \\1\\s[10]\\0こんにちは①、\\_w[42]7。\\e\r\nCharset: Shift_JIS\r\n\r\n');
+    s.get('OnSet', 'Shift_JIS', ['42']);
+    s.m._unload();
+    const again = await boot(createSatori1, SATORI1_WASM, { 'dic_test.txt': s.read('dic_test.txt'), 'satori_savedata.txt': s.read('satori_savedata.txt') });
+    expect(again.get('OnGet')).toContain('回数は４２');
+    again.m._unload();
+  });
+});
+
 describe('華和梨 8 (WebAssembly)', () => {
   it('kawarirc.kis を読み、SHIORI/3.0 の GET に答える', async () => {
     const k = await boot(createKawari, KAWARI_WASM, {
@@ -248,6 +268,19 @@ describe('minato (Rust、WebAssembly)', () => {
     const again = await boot(createMinato, MINATO_WASM, { ...files, 'save.json': m.read('save.json') });
     expect(again.get('OnGet', 'UTF-8')).toContain('42');
     again.m._unload();
+  });
+
+  it('0.2 の DLL のゴーストには、呼び出し元の let が見える 0.2 のビルドを使う', async () => {
+    const scope = {
+      ...files,
+      'talks/main.mnt': utf8(['func 呼び名() {', '    return name', '}', '', 'OnBoot => {', '    let name = "湊"', '    [0]さくら:${呼び名()}さん', '}', ''].join('\n')),
+    };
+    const latest = await boot(createMinato, MINATO_WASM, scope);
+    expect(latest.get('OnBoot', 'UTF-8')).not.toContain('湊さん');
+    latest.m._unload();
+    const old = await boot(createMinato02, MINATO02_WASM, scope);
+    expect(old.get('OnBoot', 'UTF-8')).toContain('湊さん');
+    old.m._unload();
   });
 });
 

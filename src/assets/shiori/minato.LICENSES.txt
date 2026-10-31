@@ -1,4 +1,4 @@
-minato — https://github.com/mizuki-yura/minato.git @ 3b2d35af3d7e639e2df94c74582b89dad8f37ff1
+minato — https://github.com/mizuki-yura/minato.git @ 80febc0b27a3bb189e6c1b7de36bee7d6f90d8ba
 
 ------------------------------------------------------------------------
 minato (MIT)
