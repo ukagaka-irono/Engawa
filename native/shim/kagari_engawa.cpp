@@ -19,6 +19,9 @@
 #include "engawa_saori.h"
 #include "lua.hpp"
 
+// LPeg (engines.mjs の deps で取ってきて、一緒に組む)
+extern "C" int luaopen_lpeg(lua_State *L);
+
 extern "C" {
 int kagari_load(char *path, long len);
 int kagari_unload(int id);
@@ -242,7 +245,8 @@ int open_saori(lua_State *L) {
 
 // ---------------------------------------------------------------- Lua で書いたもの
 
-// lua-utf8 のうち kotori が使うもの。next(s, i) は i の次の文字の位置と符号 (i が無ければ最初の文字)。
+// lua-utf8 のうちゴーストが使うもの。next(s, i) は i の次の文字の位置と符号 (i が無ければ最初の文字)、
+// sub は文字単位の string.sub、width は表示幅 (東アジアの全角は 2、結合文字は 0。曖昧な幅の文字は 1)。
 // kagari は Lua の utf8 ライブラリを開かないので、読み込むときに引数として渡す
 const char *LUA_UTF8 =
     "local utf8 = ...\n"
@@ -252,11 +256,103 @@ const char *LUA_UTF8 =
     "  if p == nil or p > #s then return nil end\n"
     "  return p, utf8.codepoint(s, p)\n"
     "end\n"
+    "function M.sub(s, i, j)\n"
+    "  local n = utf8.len(s) or #s\n"
+    "  i, j = i or 1, j or -1\n"
+    "  if i < 0 then i = math.max(n + i + 1, 1) elseif i == 0 then i = 1 end\n"
+    "  if j < 0 then j = n + j + 1 elseif j > n then j = n end\n"
+    "  if i > j then return '' end\n"
+    "  return s:sub(utf8.offset(s, i), (utf8.offset(s, j + 1) or #s + 1) - 1)\n"
+    "end\n"
+    "local wide = { 0x1100,0x115F, 0x2E80,0x303E, 0x3041,0x33FF, 0x3400,0x4DBF, 0x4E00,0x9FFF, 0xA000,0xA4CF, 0xAC00,0xD7A3,\n"
+    "  0xF900,0xFAFF, 0xFE30,0xFE4F, 0xFF00,0xFF60, 0xFFE0,0xFFE6, 0x1F300,0x1F64F, 0x1F900,0x1F9FF, 0x20000,0x3FFFD }\n"
+    "local function cwidth(c)\n"
+    "  if (c >= 0x300 and c <= 0x36F) or (c >= 0x200B and c <= 0x200F) or (c >= 0xFE00 and c <= 0xFE0F) then return 0 end\n"
+    "  for k = 1, #wide, 2 do if c >= wide[k] and c <= wide[k + 1] then return 2 end end\n"
+    "  return 1\n"
+    "end\n"
+    "function M.width(s)\n"
+    "  if type(s) == 'number' then return cwidth(s) end\n"
+    "  local w = 0\n"
+    "  for _, c in utf8.codes(s) do w = w + cwidth(c) end\n"
+    "  return w\n"
+    "end\n"
     "return M\n";
 
 // ファイルハンドルなどの拡張は使えない。どの関数を呼んでも失敗 (nil と理由) を返す
 const char *LUA_UNSUPPORTED =
     "return setmetatable({}, { __index = function() return function() return nil, 'not supported in Engawa (browser)' end end })\n";
+
+// LuaSocket の socket.core。ブラウザからはソケットを開けないので、つなぐものはいつも失敗 (nil と理由) を返す。
+// ゴーストは index.lua で開発用のログの送り先 (localhost) につなぎにいき、つながらなければそのまま進む。
+// socket.lua が読み込むときに使う newtry・protect は本物と同じにする
+const char *LUA_SOCKET_CORE =
+    "local M = { _VERSION = 'LuaSocket 3.0.0 (Engawa)' }\n"
+    "local function fail() return nil, 'not supported in Engawa (browser)' end\n"
+    "M.connect, M.tcp, M.tcp4, M.tcp6, M.udp, M.udp4, M.udp6, M.bind = fail, fail, fail, fail, fail, fail, fail, fail\n"
+    "M.dns = setmetatable({}, { __index = function() return fail end })\n"
+    "function M.gettime() return os.time() + os.clock() % 1 end\n"
+    "function M.sleep() end\n"
+    "function M.select() return {}, {}, 'timeout' end\n"
+    "function M.skip(n, ...) return select(n + 1, ...) end\n"
+    "function M.newtry(finalizer)\n"
+    "  return function(...)\n"
+    "    if not (...) then\n"
+    "      if finalizer then pcall(finalizer) end\n"
+    "      error({ (select(2, ...)) }, 0)\n"
+    "    end\n"
+    "    return ...\n"
+    "  end\n"
+    "end\n"
+    "function M.protect(f)\n"
+    "  return function(...)\n"
+    "    local r = table.pack(pcall(f, ...))\n"
+    "    if r[1] then return table.unpack(r, 2, r.n) end\n"
+    "    if type(r[2]) == 'table' then return nil, r[2][1] end\n"
+    "    error(r[2], 0)\n"
+    "  end\n"
+    "end\n"
+    "return M\n";
+
+// Lua Lanes (別のスレッドで Lua を動かす)。ブラウザの wasm ではスレッドを作れないので、lane は作るが動かさない
+// (status は "error"、join は nil と理由)。ゴーストの lanes/init.lua は C の部分に深く頼っているので、lanes ごと置き換える
+const char *LUA_LANES =
+    "local M = {}\n"
+    "local function fail() return nil, 'not supported in Engawa (browser)' end\n"
+    "local lane = { __index = function(_, k) if k == 'join' or k == 'cancel' then return fail end end }\n"
+    "function M.configure() return M end\n"
+    "function M.gen() return function() return setmetatable({ status = 'error' }, lane) end end\n"
+    "function M.linda() return setmetatable({}, { __index = function() return fail end }) end\n"
+    "function M.now_secs() return os.time() end\n"
+    "function M.sleep() end\n"
+    "M.timer, M.timers, M.genlock, M.genatomic, M.require = fail, fail, fail, fail, require\n"
+    "return M\n";
+
+// 『盤上の隅っこで』などの rand.native (種を決められる乱数)。Native(seed) が返すものを呼ぶと 0〜2^32-1 を返す。
+// 中身は xorshift32 (元の DLL と同じ並びにはならない)
+const char *LUA_RAND_NATIVE =
+    "local PRNG = {}\n"
+    "PRNG.__index = PRNG\n"
+    "local function next32(self)\n"
+    "  local x = self.x\n"
+    "  x = x ~ ((x << 13) & 0xffffffff)\n"
+    "  x = x ~ (x >> 17)\n"
+    "  x = x ~ ((x << 5) & 0xffffffff)\n"
+    "  self.x = x\n"
+    "  return x\n"
+    "end\n"
+    "PRNG.__call = next32\n"
+    "function PRNG:uniform(max) return next32(self) % max + 1 end\n"
+    "function PRNG:normal_distribution(ave, dev)\n"
+    "  local u1, u2 = (next32(self) + 1) / 4294967297, next32(self) / 4294967296\n"
+    "  return ave + dev * math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2)\n"
+    "end\n"
+    "return setmetatable({}, { __call = function(_, seed)\n"
+    "  local n = math.tointeger(tonumber(seed))\n"
+    "  if not n then n = 0; for i = 1, #tostring(seed) do n = (n * 31 + tostring(seed):byte(i)) & 0xffffffff end end\n"
+    "  n = n & 0xffffffff\n"
+    "  return setmetatable({ x = n ~= 0 and n or 0x9e3779b9 }, PRNG)\n"
+    "end })\n";
 
 int open_lua(lua_State *L, const char *code, const char *name) {
   if (luaL_loadbuffer(L, code, strlen(code), name) != LUA_OK) return lua_error(L);
@@ -271,6 +367,9 @@ int open_lua_utf8(lua_State *L) {
   return 1;
 }
 int open_unsupported(lua_State *L) { return open_lua(L, LUA_UNSUPPORTED, "=unsupported"); }
+int open_socket_core(lua_State *L) { return open_lua(L, LUA_SOCKET_CORE, "=socket.core"); }
+int open_lanes(lua_State *L) { return open_lua(L, LUA_LANES, "=lanes"); }
+int open_rand_native(lua_State *L) { return open_lua(L, LUA_RAND_NATIVE, "=rand.native"); }
 
 }  // namespace
 
@@ -290,6 +389,13 @@ void engawa_kagari_preload(lua_State *L) {
       {"saori_universal.native", open_saori},
       {"ukagaka_misc.windows", open_unsupported},
       {"conv.windows", open_unsupported},
+      {"socket.core", open_socket_core},
+      {"mime.core", open_unsupported},
+      {"ssl.core", open_unsupported},
+      {"lanes", open_lanes},
+      {"lpeg", luaopen_lpeg},
+      {"rand.native", open_rand_native},
+      {"clipboard", open_unsupported},
   };
   for (const auto &m : modules) {
     lua_pushcfunction(L, m.open);

@@ -1342,6 +1342,10 @@ export class GhostManager implements GhostEnv {
       raise: (id: string, ...refs: string[]) => this.current?.raise(id, refs),
       ghosts: () => this.ghosts.map((g) => g.name),
       sstp: (request: string) => this.sstp(request, true),
+      // 互換性の試験 (tools/compat-check.mjs) が使う: 起動中のゴーストの様子と、ログ
+      status: () => this.ghosts.map((g) => ({ name: g.name, key: g.key, shiori: g.shioriName, shell: g.shell?.name, status: g.status(), surfaces: [g.surfaceOf(0), g.surfaceOf(1)] })),
+      logs: (kind: string) => this.logs(kind).map((l) => `${l.name}: ${l.value}`),
+      close: () => this.current?.close(),
     };
     // x-ukagaka-link: のリンク (ページのリンクを押したとき・アドレスの ?x-ukagaka-link=… / #x-ukagaka-link:…)
     document.addEventListener(

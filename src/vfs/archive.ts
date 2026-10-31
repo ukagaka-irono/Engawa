@@ -119,8 +119,11 @@ export function filesFromZip(data: Uint8Array): FileTree {
   }
   const tree = new FileTree();
   for (const [key, bytes] of Object.entries(entries)) {
-    if (key.endsWith('/')) continue;
-    tree.set(names.get(key) ?? guessName(key), bytes);
+    // Windows の道具で作ったものには、区切りが \ のフォルダ (ghost\master\) もある。
+    // Shift_JIS の「ソ」などは2バイト目が \ なので、名前を読んでから見る
+    const name = names.get(key) ?? guessName(key);
+    if (/[/\\]$/.test(name)) continue;
+    tree.set(name, bytes);
   }
   return tree;
 }

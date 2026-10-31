@@ -7,6 +7,8 @@ import { prepareWasmSaori } from '../src/saori/wasm';
 import createYaya from '../src/assets/shiori/yaya.mjs';
 import YAYA_WASM from '../src/assets/shiori/yaya.wasm.gz?inline';
 import type { EmscriptenModule, EngineFactory } from '../src/shiori/native-engines';
+import { ignoreCase } from '../src/shiori/native-call';
+import { normalizePath } from '../src/vfs/files';
 import { encodeCharset } from '../src/util/charset-encode';
 
 /** テストでの、ブラウザとページの様子 */
@@ -40,6 +42,7 @@ export async function boot(create: EngineFactory, wasmDataUrl: string, files: Re
   const out: string[] = [];
   const m: EmscriptenModule = await create({ wasmBinary, locateFile: (p) => p, print: (s) => out.push(s), printErr: (s) => out.push(s) });
   const fs = m.FS as EmscriptenModule['FS'] & { mkdirTree(path: string): void };
+  ignoreCase(m.FS, '/ghost/master');
   fs.mkdirTree('/ghost/master');
   for (const [path, data] of Object.entries(files)) {
     const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
@@ -51,8 +54,8 @@ export async function boot(create: EngineFactory, wasmDataUrl: string, files: Re
   const effects: SaoriEffect[] = [];
   const log = (s: string) => out.push(s);
   const post = (e: SaoriEffect) => effects.push(e);
-  const plans = Object.entries(saori).map(([path, [kind, url]]) => ({ path, kind, wasm: dataUrlBytes(url) }));
-  const prepared = await prepareWasmSaori(plans, Object.entries(files), { fs: m.FS, root: '/ghost/master', post, log });
+  const plans = Object.entries(saori).map(([path, [kind, url]]) => ({ path: normalizePath(path), kind, wasm: dataUrlBytes(url) }));
+  const prepared = await prepareWasmSaori(plans, Object.entries(files).map(([p, d]) => [normalizePath(p), d] as [string, Uint8Array]), { fs: m.FS, root: '/ghost/master', post, log });
   const host = new SaoriHost(m.FS, '/ghost/master', saoriResolver({ fs: m.FS, env: () => TEST_ENV, post, log, prepared }), log);
   m.engawaSaori = host.bridge;
   const put = (bytes: Uint8Array) => {

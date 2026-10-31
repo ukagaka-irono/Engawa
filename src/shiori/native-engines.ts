@@ -23,7 +23,8 @@ export interface EmscriptenFS {
   writeFile(path: string, data: Uint8Array, opts?: { canOwn?: boolean }): void;
   readFile(path: string): Uint8Array;
   readdir(path: string): string[];
-  stat(path: string): { mode: number; mtime: Date | number };
+  stat(path: string): { mode: number; size: number; mtime: Date | number };
+  unlink(path: string): void;
   isDir(mode: number): boolean;
   isFile(mode: number): boolean;
   analyzePath(path: string): { exists: boolean };

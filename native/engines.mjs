@@ -296,6 +296,7 @@ export const ENGINES = [
       { title: 'kagari (MIT)', file: 'LICENSE' },
       { title: 'Lua 5.4 (MIT)', file: '@lua/lua.h', from: '* Copyright (C) 1994', to: '*******************************************************************************/' },
       { title: 'sol2 (MIT)', file: '@sol2/LICENSE.txt' },
+      { title: 'LPeg (MIT)', file: '@lpeg/lpeg.html', from: 'Copyright &copy; 2007', to: '</div> <!-- id="content"', html: true },
     ],
     repo: 'https://github.com/Tatakinov/kagari_shiori.git',
     commit: 'ba87ccbd850c787aeeea7d31bed293d64bc09f01',
@@ -303,9 +304,11 @@ export const ENGINES = [
     deps: [
       { name: 'lua', repo: 'https://github.com/lua/lua.git', commit: '5d708c3f9cae12820e415d4f89c9eacbe2ab964b' },
       { name: 'sol2', repo: 'https://github.com/ThePhD/sol2.git', commit: '288f4f4e73f379cca56f8eb7840a449adac0acb9' },
+      // ゴーストが lib/lpeg.dll として持ってくることのある LPeg (1.1.0) は、組み込んで package.preload に入れる
+      { name: 'lpeg', repo: 'https://github.com/roberto-ieru/LPeg.git', commit: '73a96935337d78d0e1015d7ccce6cf7470c192c4' },
     ],
     encoding: 'utf-8',
-    includes: ['.', '@lua/.', '@sol2/include'],
+    includes: ['.', '@lua/.', '@sol2/include', '@lpeg/.'],
     // lua.hpp (Lua の配布物にあるもの) と、DLL の口・ゴーストの Lua が require する C モジュールの代わり
     shimIncludes: ['lua'],
     shims: ['kagari_engawa.cpp'],
@@ -334,6 +337,7 @@ export const ENGINES = [
         'lstring', 'ltable', 'ltm', 'lundump', 'lvm', 'lzio', 'lauxlib', 'lbaselib', 'lcorolib', 'ldblib', 'liolib', 'lmathlib',
         'loadlib', 'loslib', 'lstrlib', 'ltablib', 'lutf8lib', 'linit',
       ].map((n) => `@lua/${n}.c`),
+      ...['lpcap', 'lpcode', 'lpcset', 'lpprint', 'lptree', 'lpvm'].map((n) => `@lpeg/${n}.c`),
     ],
   },
   {

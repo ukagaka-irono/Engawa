@@ -322,8 +322,16 @@ export class Ghost implements PlayerHost {
   readonly uniqueId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   private shiori?: Shiori;
+
+  /** 動かしている SHIORI の名前 (読み込めなかったものは UnsupportedShiori の説明) */
+  get shioriName(): string {
+    return this.shiori?.name ?? '';
+  }
   /** \![unload,shiori] の後 */
   private shioriUnloaded = false;
+  /** SHIORI が ErrorLevel で知らせたもの (同じものは1度だけログに書く) と、通知したか */
+  private readonly reportedErrors = new Set<string>();
+  private errorNotified = false;
   private readonly player = new ScriptPlayer(this);
   private readonly scopes = new Map<number, Scope>();
   private readonly state: GhostState;
@@ -521,7 +529,7 @@ export class Ghost implements PlayerHost {
 
   private async loadShiori(): Promise<Shiori> {
     let shiori = createShiori(this.files, this.descript, {
-      onWrite: (path, data) => this.saveFile(path, data),
+      onWrite: (path, data) => this.saveFile(path, data, true),
       onLog: (m) => {
         console.info(`[${this.name}]`, m);
         this.env.log(this, 'error', m);
@@ -544,7 +552,10 @@ export class Ghost implements PlayerHost {
     const ghosts = all.filter((p) => p.kind === 'ghost');
     const balloons = all.filter((p) => p.kind === 'balloon');
     await this.notify('basewareversion', [BASEWARE_VERSION, BASEWARE_NAME]);
-    await this.notify('hwnd', ['', '']);
+    // ブラウザにはウインドウハンドルが無いので、キャラクターごとの仮の番号 (\x01 区切り)。
+    // 空にすると、数を数えて分けるゴースト (kotori の notify.lua など) が止まる
+    const windows = Array.from({ length: Math.max(2, this.scopes.size) }, (_, i) => i);
+    await this.notify('hwnd', [windows.map((i) => 1 + i).join('\x01'), windows.map((i) => 101 + i).join('\x01')]);
     await this.notify('uniqueid', [this.uniqueId]);
     await this.notify('capability', ['request.status', 'request.securitylevel', 'request.sender', 'response.marker', 'response.errorlevel', 'response.errordescription']);
     await this.notify('ownerghostname', [this.sakuraName]);
@@ -868,12 +879,33 @@ export class Ghost implements PlayerHost {
     try {
       const res = parseResponse(await this.shiori.request(buildRequest({ method, id, references, headers })));
       this.env.log(this, 'request', `${method} ${id}${references.length ? ` [${references.join(', ')}]` : ''}${res.value ? ` → ${res.value}` : ''}`);
+      this.reportShioriErrors(id, res.headers);
       return res.value;
     } catch (e) {
       console.warn(`[${this.name}] ${id}:`, e);
       this.env.log(this, 'error', `${id}: ${(e as Error).message}`);
       return undefined;
     }
+  }
+
+  /**
+   * 応答の ErrorLevel・ErrorDescription (SSP 拡張。複数は \x01 区切り) をエラーログに書く。同じものは1度だけ。
+   * error・critical があれば、ゴーストごとに1度だけ通知する (SSP は通知領域のエラーアイコン)
+   */
+  private reportShioriErrors(id: string, headers: Map<string, string>): void {
+    const levels = headers.get('errorlevel');
+    if (!levels) return;
+    const descriptions = (headers.get('errordescription') ?? '').split('\x01');
+    levels.split('\x01').forEach((level, i) => {
+      const text = `${level.trim()}: ${descriptions[i]?.trim() || '(説明なし)'}`;
+      if (this.reportedErrors.has(text)) return;
+      this.reportedErrors.add(text);
+      this.env.log(this, 'error', `${id}: ${text}`);
+      if (/^(error|critical)$/i.test(level.trim()) && !this.errorNotified) {
+        this.errorNotified = true;
+        this.env.toast(`「${this.name}」の SHIORI がエラーを知らせています (メニューの「ユーティリティ」→「エラーログ」で見られます)`);
+      }
+    });
   }
 
   notify(id: string, references: Reference[] = []): Promise<string | undefined> {
@@ -3368,9 +3400,11 @@ export class Ghost implements PlayerHost {
   }
 
   /** SHIORI (や SAORI) が書いたファイルを、表示に使う写しとセーブデータの両方に入れる */
-  private saveFile(path: string, data: Uint8Array): void {
+  /** fromShiori は SHIORI じしんが書いたもの (SHIORI の側には既にある) */
+  private saveFile(path: string, data: Uint8Array, fromShiori = false): void {
     const p = normalizePath(path);
     this.files.set(p, data);
+    if (!fromShiori) this.shiori?.putFile?.(p, data);
     // 書き換えられた画像などは、作ってあった URL を作り直す
     for (const key of [p, ...[...this.blobUrls.keys()].filter((k) => k.startsWith(`${p}|`))]) {
       const url = this.blobUrls.get(key);

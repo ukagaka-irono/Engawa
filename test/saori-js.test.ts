@@ -39,7 +39,8 @@ describe('クリップボード・音 (メインスレッドに頼む)', () => {
     const wav = Uint8Array.of(0x52, 0x49, 0x46, 0x46);
     const s = await openSaori('saori/PlayWavSound.dll', { 'sound/Hello.wav': wav });
     expect(s.execute('..\\sound\\hello.wav').result).toBe('1');
-    expect(s.y.effects).toEqual([{ kind: 'sound', path: 'ghost/master/sound/Hello.wav', data: wav }]);
+    // ゴーストのファイルは小文字の名前で置かれる (本番の FileTree と同じ)
+    expect(s.y.effects).toEqual([{ kind: 'sound', path: 'ghost/master/sound/hello.wav', data: wav }]);
     expect(s.execute('system:SystemAsterisk').result).toBe('1');
     expect(s.y.effects).toHaveLength(1);
   });

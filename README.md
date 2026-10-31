@@ -92,7 +92,7 @@ Internet Explorer には対応していません。
 | なし栞 | nashi.dll | [yanashi-interface/nashi-shiori-studio](https://github.com/yanashi-interface/nashi-shiori-studio) |
 | minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) |
 | pasta (Rust と Lua) | pasta.dll (pasta.toml) | [ekicyou/pasta](https://github.com/ekicyou/pasta) (LuaJIT の代わりに Lua 5.4 で動かす) |
-| kagari (Lua 5.4。kotori を含む) | kagari.dll | [Tatakinov/kagari_shiori](https://github.com/Tatakinov/kagari_shiori) |
+| kagari (Lua 5.4。kotori を含む) | kagari.dll | [Tatakinov/kagari_shiori](https://github.com/Tatakinov/kagari_shiori) (ゴーストが同梱する C のモジュールのうち、LPeg は組み込み、lua-utf8・luachild・iconv・rand は作り直したものを使う) |
 | quickshiori (QuickJS) | quickshiori.dll | [cronfox/quickshiori](https://github.com/cronfox/quickshiori) |
 
 できないこと:
@@ -100,11 +100,15 @@ Internet Explorer には対応していません。
 - **下の表に無い SAORI と、プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
 - **.NET (dnproxy)・PowerShell (powershiori) の SHIORI** は、ブラウザで動く実行環境が無いので動きません。
 - **蒼空 (aosora)** は、ソースの使い方が個人利用に限られている (まだライセンスが決まっていない) ので組み込んでいません。
+- kagari のゴーストが使う LuaSocket・Lua Lanes は読み込めますが、ソケットはつながらず、別のスレッドの処理 (lane) は動きません。
+- 実行ファイルの中にゴーストを書いた SHIORI (Go・Zig などで書いて DLL にしたもの、SHIOLINK から別のプログラムを呼ぶもの) は動きません。
 - pasta は LuaJIT の代わりに標準の Lua 5.4 で動かすので、LuaJIT にしか無いもの (`jit`・`ffi`・`bit`) を使う台本は動きません。
 - minato が内部でパニックした場合、その SHIORI はそこで止まります (Safari 12 で動かすため、Rust の例外処理を使わずに組んでいます)。
 
 上のどれにも当たらない SHIORI のゴーストは、シェルの表示とメニューだけが使え、起動時にその旨をバルーンで知らせます。
 SHIORI のセーブデータは、ゴーストを閉じたとき・ページを閉じたり隠したりしたときに保存します。
+SHIORI が応答の `ErrorLevel`・`ErrorDescription` で知らせたエラーはエラーログに書き、error 以上ならゴーストごとに1度通知します。
+Windows と同じく、SHIORI・SAORI から見たファイル名は大文字・小文字を区別しません。
 
 組み込んでいる SHIORI・SAORI とライブラリのライセンスは、メニューの「ライセンス」で見られます。
 

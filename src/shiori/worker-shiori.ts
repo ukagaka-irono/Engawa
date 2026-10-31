@@ -55,6 +55,12 @@ export abstract class WorkerShiori {
     }
   }
 
+  /** Worker の中のファイルの写しにも置く (要求の順に届くので、次の request からは読める) */
+  putFile(path: string, data: Uint8Array): void {
+    if (!this.worker || !path.startsWith('ghost/master/')) return;
+    void this.call({ type: 'put', path: path.slice('ghost/master/'.length), data } as WorkerCall, REQUEST_TIMEOUT_MS).catch((e) => this.hooks.onLog(`SHIORI put: ${(e as Error).message}`));
+  }
+
   private terminate(reason: string): void {
     this.worker?.terminate();
     this.worker = undefined;

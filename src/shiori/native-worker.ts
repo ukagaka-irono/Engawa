@@ -8,7 +8,7 @@ import type { SaoriEffect, SaoriEnv } from '../saori/context';
 import { SaoriHost } from '../saori/host';
 import { saoriResolver } from '../saori/registry';
 import { prepareWasmSaori, type WasmSaoriPlan } from '../saori/wasm';
-import { callLoad, callRequest, walk, writeFiles } from './native-call';
+import { callLoad, callRequest, ignoreCase, walk, writeFiles } from './native-call';
 import { ENGINES, type EmscriptenModule, type EngineId } from './native-engines';
 
 type ToNative =
@@ -16,6 +16,7 @@ type ToNative =
   | { id: number; type: 'request'; data: Uint8Array }
   | { id: number; type: 'env'; env: SaoriEnv }
   | { id: number; type: 'flush' }
+  | { id: number; type: 'put'; path: string; data: Uint8Array }
   | { id: number; type: 'unload' };
 
 const ctx = self as unknown as {
@@ -68,6 +69,7 @@ async function load(msg: Extract<ToNative, { type: 'load' }>): Promise<void> {
     print: (s: string) => log(s),
     printErr: (s: string) => log(s),
   });
+  ignoreCase(m.FS, ROOT);
   writeFiles(m.FS, ROOT, msg.files);
   for (const [path, data] of msg.files) original.set(path, data);
   m.FS.chdir(ROOT);
@@ -104,6 +106,11 @@ ctx.onmessage = async (e) => {
       case 'flush':
         flush();
         break;
+      case 'put':
+        // Engawa がゴーストのフォルダに書いたもの。書き戻さないように original にも入れる
+        if (mod) writeFiles(mod.FS, ROOT, [[msg.path, msg.data]]);
+        original.set(msg.path, msg.data);
+        break;
       case 'unload':
         mod?._unload();
         // SHIORI が閉じ忘れた SAORI も unload する
@@ -115,6 +122,21 @@ ctx.onmessage = async (e) => {
     }
     ctx.postMessage({ id: msg.id, type: 'result', ok: true, value }, value ? [value.buffer] : []);
   } catch (err) {
-    ctx.postMessage({ id: msg.id, type: 'result', ok: false, error: err instanceof Error ? err.message : String(err) });
+    ctx.postMessage({ id: msg.id, type: 'result', ok: false, error: describeError(err) });
   }
 };
+
+/** Emscripten は Error でないもの (exit() の ExitStatus など) も投げるので、読める形にする */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const { name, message } = err as { name?: unknown; message?: unknown };
+    if (typeof message === 'string') return typeof name === 'string' ? `${name}: ${message}` : message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      // 循環しているなど
+    }
+  }
+  return String(err);
+}

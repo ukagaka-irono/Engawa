@@ -113,7 +113,9 @@ export class EnvironmentEvents {
 
   async bootNotices(g: Ghost): Promise<void> {
     const lang = navigator.language || 'ja-JP';
-    await g.notify('OnLanguageChange', ['日本語', 'japanese', '', '']);
+    // Engawa の画面は日本語だけ。SSP の標準の日本語は、言語名 Japanese・言語 ID 0 で届く
+    // (kotori は Reference0 を content の Japanese / English と照らし合わせる)
+    await g.notify('OnLanguageChange', ['Japanese', '0', '', '']);
     const now = new Date();
     const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
     const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();

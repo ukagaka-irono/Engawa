@@ -4,3 +4,4 @@ dist/
 *.log
 native/.src/
 native/.build/
+tools/.compat/

@@ -98,6 +98,9 @@ ctx.onmessage = async (e) => {
         if (!shiori) throw new Error('SHIORI is not loaded');
         value = String(await shiori.request(msg.text));
         break;
+      case 'put':
+        files.set(normalizePath(msg.path), msg.data);
+        break;
       case 'unload':
         await shiori?.unload?.();
         shiori = undefined;

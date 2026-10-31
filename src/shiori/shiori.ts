@@ -20,6 +20,8 @@ export interface Shiori {
   load(): Promise<void>;
   request(text: string): Promise<string>;
   unload(): Promise<void>;
+  /** Engawa がゴーストのフォルダに書いたファイル (HTTP の --file など。パスはゴーストルートから) を、SHIORI からも読めるようにする */
+  putFile?(path: string, data: Uint8Array): void;
 }
 
 /**

@@ -240,7 +240,7 @@ async function buildRust(engine, src, buildDir) {
 /**
  * 組み込む SHIORI と、その中に入る他のコードのライセンスの写しを、src/assets/shiori/<engine>.LICENSES.txt に書く。
  * BSD・MIT などは、バイナリを配るときにも著作権表示と条文を一緒に配る決まりなので、Engawa の「ライセンス」で見せる。
- * engines.mjs の licenses は { title, file, encoding?, from?, to? } (from・to はファイルの一部だけを使うとき)。
+ * engines.mjs の licenses は { title, file, encoding?, from?, to?, html? } (from・to はファイルの一部だけを使うとき。html はタグを除く)。
  */
 function licenseText(spec, locate) {
   const [root, rel] = locate(spec.file);
@@ -254,6 +254,16 @@ function licenseText(spec, locate) {
   if (spec.to) {
     const j = text.indexOf(spec.to);
     if (j >= 0) text = text.slice(0, j);
+  }
+  // HTML の中にしか条文が無いもの (LPeg の lpeg.html)
+  if (spec.html) {
+    const entities = { amp: '&', lt: '<', gt: '>', quot: '"', copy: '©', nbsp: ' ' };
+    text = text
+      .replace(/<[^>]*>/g, '')
+      .replace(/&(\w+);/g, (m, name) => entities[name] ?? m)
+      .replace(/[ \t]*\r?\n[ \t]*/g, '\n')
+      .replace(/([^\n])\n(?=[^\n])/g, '$1 ')
+      .replace(/\n{3,}/g, '\n\n');
   }
   return text.replace(/\r\n?/g, '\n').trim();
 }

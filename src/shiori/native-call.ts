@@ -9,17 +9,57 @@ export function mkdirs(fs: EmscriptenFS, dir: string): void {
   let path = '';
   for (const part of dir.split('/').filter(Boolean)) {
     path += '/' + part;
-    if (!fs.analyzePath(path).exists) fs.mkdir(path);
+    const found = fs.analyzePath(path);
+    // 前の版がフォルダの項目を空のファイルとして保存していることがある (区切りが \ の nar)
+    if (found.exists && !fs.isDir(fs.stat(path).mode) && fs.stat(path).size === 0) fs.unlink(path);
+    else if (found.exists) continue;
+    fs.mkdir(path);
   }
+}
+
+/**
+ * Windows と同じく、root の下ではファイル名の大文字・小文字を区別しないようにする。
+ * ゴーストのファイルは小文字で置く (vfs/files.ts の normalizePath と同じ) ので、見つからない名前は小文字にして探し直し、
+ * root の下に作るファイルも小文字の名前にする (yaya.txt の `dic, dic\module\yaya_iObj.aym` など)
+ */
+export function ignoreCase(fs: EmscriptenFS, root: string): void {
+  const raw = fs as unknown as {
+    lookupNode(parent: unknown, name: string): unknown;
+    mknod(path: string, mode: number, dev: number): unknown;
+    rename(from: string, to: string): void;
+    cwd(): string;
+  };
+  const fold = (name: string) => name.normalize('NFC').toLowerCase();
+  const under = (path: string) => (path.startsWith('/') ? path : `${raw.cwd()}/${path}`).startsWith(`${root}/`);
+  const foldBase = (path: string) => {
+    if (!under(path)) return path;
+    const slash = path.lastIndexOf('/');
+    return path.slice(0, slash + 1) + fold(path.slice(slash + 1));
+  };
+  const { lookupNode, mknod, rename } = raw;
+  raw.lookupNode = (parent, name) => {
+    try {
+      return lookupNode.call(fs, parent, name);
+    } catch (e) {
+      if (fold(name) === name) throw e;
+      return lookupNode.call(fs, parent, fold(name));
+    }
+  };
+  raw.mknod = (path, mode, dev) => mknod.call(fs, foldBase(path), mode, dev);
+  raw.rename = (from, to) => rename.call(fs, from, foldBase(to));
 }
 
 /** (root からの相対パス, 中身) をメモリ上のファイルシステムに置く */
 export function writeFiles(fs: EmscriptenFS, root: string, files: Iterable<[string, Uint8Array]>): void {
   mkdirs(fs, root);
   for (const [path, data] of files) {
-    const slash = path.lastIndexOf('/');
-    if (slash >= 0) mkdirs(fs, `${root}/${path.slice(0, slash)}`);
-    fs.writeFile(`${root}/${path}`, data);
+    try {
+      const slash = path.lastIndexOf('/');
+      if (slash >= 0) mkdirs(fs, `${root}/${path.slice(0, slash)}`);
+      fs.writeFile(`${root}/${path}`, data);
+    } catch (e) {
+      throw new Error(`${path} を置けません (errno ${(e as { errno?: number }).errno})`);
+    }
   }
 }
 

@@ -18,7 +18,7 @@ import createXaoric from '../assets/saori/xaoric.mjs';
 import createKawari from '../assets/shiori/kawari.mjs';
 import createSatori from '../assets/shiori/satori.mjs';
 import createYaya from '../assets/shiori/yaya.mjs';
-import { callLoad, callRequest, mkdirs, walk } from '../shiori/native-call';
+import { callLoad, callRequest, ignoreCase, mkdirs, walk } from '../shiori/native-call';
 import type { EmscriptenFS, EngineFactory } from '../shiori/native-engines';
 import { encodeCharset } from '../util/charset-encode';
 import type { SaoriEffect } from './context';
@@ -97,6 +97,7 @@ export async function prepareWasmSaori(plans: WasmSaoriPlan[], files: [string, U
         printErr: (s) => services.log(`[${plan.path}] ${s}`),
       });
       // ゴーストのファイルを同じパスに置く。中身の配列は写さずに使う (SAORI が書き換えるときは、新しい配列になる)
+      ignoreCase(m.FS, services.root);
       mkdirs(m.FS, services.root);
       for (const [rel, data] of files) {
         const slash = rel.lastIndexOf('/');

@@ -64,6 +64,36 @@ describe('YAYA (WebAssembly)', () => {
     expect(y.m.HEAPU8.length).toBe(heap);
     y.m._unload();
   });
+
+  it('Windows と同じく、ファイル名の大文字・小文字を区別しない (ファイルは小文字で置かれる)', async () => {
+    const y = await boot(createYaya, YAYA_WASM, {
+      'yaya.txt': sjis('charset, Shift_JIS\ndic, Dic\\Module\\Test_IObj.DIC\n'),
+      'dic/module/test_iobj.dic': sjis(
+        [
+          'request',
+          '{',
+          '  _d = RE_SEARCH(_argv[0], "ID: (\\w+)")',
+          '  _v = EVAL(RE_GETSTR[1])',
+          '  "SHIORI/3.0 200 OK" + CHR(13,10) + "Charset: Shift_JIS" + CHR(13,10) + "Value: " + _v + CHR(13,10) + CHR(13,10)',
+          '}',
+          'OnBoot',
+          '{',
+          '  _ = FOPEN("Save\\Data.TXT", "w")',
+          '  _ = FWRITE2("Save\\Data.TXT", "x")',
+          '  FCLOSE("Save\\Data.TXT")',
+          '  _ = FOPEN("SAVE\\DATA.txt", "r")',
+          '  _line = FREAD("SAVE\\DATA.txt")',
+          '  FCLOSE("SAVE\\DATA.txt")',
+          '  "読めた" + _line',
+          '}',
+        ].join('\n'),
+      ),
+      'save/.keep': new Uint8Array(),
+    });
+    expect(y.get('OnBoot')).toContain('Value: 読めたx\r\n');
+    expect([...y.m.FS.readdir('/ghost/master/save')]).toContain('data.txt');
+    y.m._unload();
+  });
 });
 
 describe('里々 (WebAssembly)', () => {
@@ -251,6 +281,38 @@ describe('kagari (Lua 5.4、WebAssembly)', () => {
     const k = await boot(createKagari, KAGARI_WASM, { 'index.lua': utf8(index), 'sub/a.txt': utf8('a'), 'sub/d/x.txt': utf8('x') });
     expect(k.loaded).toBe(1);
     expect(k.get('OnBoot', 'UTF-8')).toBe('SHIORI/3.0 200 OK\r\nCharset: UTF-8\r\nValue: OnBoot 12354,9312 a.txt:file,d:directory 8740\r\n\r\n');
+    k.m._unload();
+  });
+
+  it('LuaSocket・Lanes・LPeg・rand.native の代わりと、lua-utf8 の width・sub', async () => {
+    // 『もす』などの index.lua は、最初に開発用のログの送り先へ socket でつなぎにいく (つながらなければ進む)
+    const lua = [
+      'local socket = require("socket.core")',
+      'local lanes = require("lanes").configure()',
+      'local lpeg = require("lpeg")',
+      'local Rand = require("rand.native")',
+      'local utf8x = require("lua-utf8")',
+      'local M = {}',
+      'function M.load() return true end',
+      'function M.request(req)',
+      '  local client, err = socket.connect("localhost", 39801)',
+      '  local ok, caught = socket.protect(function() socket.newtry()(nil, "boom") end)()',
+      '  local lane = lanes.gen("*", function() end)()',
+      '  local digits = lpeg.match(lpeg.C(lpeg.R("09") ^ 1), "123abc")',
+      '  local a, b = Rand(42), Rand(42)',
+      '  local same = a() == b() and a() == b()',
+      '  local value = table.concat({ tostring(client), err, tostring(ok), caught, lane.status, digits, tostring(same),',
+      '    utf8x.width("あa①"), utf8x.sub("あいうえお", 2, -2) }, " ")',
+      '  return "SHIORI/3.0 200 OK\\r\\nCharset: UTF-8\\r\\nValue: " .. value .. "\\r\\n\\r\\n"',
+      'end',
+      'function M.unload() return true end',
+      'return M',
+      '',
+    ].join('\n');
+    const k = await boot(createKagari, KAGARI_WASM, { 'index.lua': new TextEncoder().encode(lua) });
+    expect(k.loaded).toBe(1);
+    // ① は東アジアの幅が「曖昧」なので 1
+    expect(k.get('OnBoot', 'UTF-8')).toContain('Value: nil not supported in Engawa (browser) nil boom error 123 true 4 いうえ\r\n');
     k.m._unload();
   });
 });
