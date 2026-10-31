@@ -20,6 +20,11 @@ interface Fetched {
 export function fetchSync(url: string, method = 'GET', body?: string): Fetched {
   if (typeof XMLHttpRequest === 'undefined') return { ok: false, status: 0, error: 'XMLHttpRequest がありません' };
   try {
+    // 同じオリジンへの XMLHttpRequest はクッキーを外せないので、Engawa を置いたサイトそのものからは取らない
+    const here = typeof location === 'undefined' ? undefined : location;
+    if (here && /^https?:$/.test(here.protocol) && new URL(url, here.href).origin === here.origin) {
+      return { ok: false, status: 0, error: 'Engawa と同じサイトの URL は取れません' };
+    }
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, false);
     xhr.responseType = 'arraybuffer';

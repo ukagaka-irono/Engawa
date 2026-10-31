@@ -29,14 +29,15 @@ export function parseUpdateList(data: Uint8Array): UpdateEntry[] {
     let path = fields[0]?.trim().replace(/\\/g, '/');
     const hash = fields[1]?.trim().toLowerCase();
     if (!path || !hash || !/^[0-9a-f]{32}$/.test(hash)) continue;
-    if (path.endsWith('/') || /(^|\/)\.\.(\/|$)/.test(path)) continue;
     if (/%[0-9A-Fa-f]{2}/.test(path)) {
       try {
-        path = decodeURIComponent(path);
+        path = decodeURIComponent(path).replace(/\\/g, '/');
       } catch {
         // そのまま使う
       }
     }
+    // 戻してから調べる (%2e%2e/ で更新先のフォルダの外 (シェルの更新からゴースト本体など) へ書けないように)
+    if (path.endsWith('/') || path.startsWith('/') || /^[a-z]:/i.test(path) || /(^|\/)\.\.(\/|$)/.test(path)) continue;
     entries.push({ path, md5: hash });
   }
   return entries;
@@ -86,7 +87,8 @@ export function updateBase(homeurl: string): string | undefined {
 
 async function fetchBytes(url: string): Promise<{ data?: Uint8Array; code: string }> {
   try {
-    const res = await fetch(url, { cache: 'no-cache' });
+    // 更新の取得先はゴーストが決めるので、このページのクッキーは付けない
+    const res = await fetch(url, { cache: 'no-cache', credentials: 'omit' });
     if (!res.ok) return { code: String(res.status) };
     return { data: new Uint8Array(await res.arrayBuffer()), code: '200' };
   } catch {

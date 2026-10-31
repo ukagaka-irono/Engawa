@@ -37,8 +37,11 @@ export interface Settings {
   userName: string;
   /** 喋った言葉を音声合成で読み上げる */
   speech: boolean;
-  /** よそのページからの SSTP (postMessage) を受ける */
-  acceptSstp: boolean;
+  /**
+   * よそのページ (別のオリジン) からの SSTP (postMessage) を受ける。既定は受けない (SSP も既定ではローカルからだけ)。
+   * 前の版の acceptSstp (既定で受けていた) は引き継がない
+   */
+  acceptRemoteSstp: boolean;
   /** 音声認識で話しかける (OnVoiceRecognitionWord) */
   voiceRecognition?: boolean;
   /** ゴーストキャッシュ (切り替えたゴーストをしばらく取っておき、戻るときに速く起こす)。既定は使う */
@@ -61,7 +64,7 @@ const DEFAULTS: Settings = {
   balloonScale: 1,
   userName: 'ユーザ',
   speech: false,
-  acceptSstp: true,
+  acceptRemoteSstp: false,
   running: [],
   ghosts: {},
 };

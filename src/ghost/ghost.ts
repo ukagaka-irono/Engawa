@@ -20,7 +20,7 @@ import { filesFromZip } from '../vfs/archive';
 import { joinPath, normalizePath, type FileTree } from '../vfs/files';
 import { writePackageFile, type PackageMeta } from '../vfs/storage';
 import type { GhostListEntry } from './ghostlist';
-import { httpEvent, nofileText, parseFeed, parseHttp, runHttp, type HttpRequest } from './http';
+import { httpEvent, httpFileName, nofileText, parseFeed, parseHttp, runHttp, type HttpRequest } from './http';
 import { calendarRefs, parseICal, parseScheduleDate, type CalEvent } from './ical';
 import { moveTarget, parseMove, type Rect } from './move';
 import { rateOfUse, readProperty, writeProperty, type LogEntry, type PropertyHost, type SoundInfo } from './properties';
@@ -186,6 +186,8 @@ interface RaiseOptions {
   kinds?: string[];
   /** トランスレートしない (SSTP の notranslate) */
   noTranslate?: boolean;
+  /** Reference をログ (SHIORI リクエスト・developer.log) に残さない (パスワードの入力) */
+  secret?: boolean;
 }
 
 /** スクリプトの由来 (OnOtherGhostTalk・OnTranslate・SSTP のマーカー用) */
@@ -240,6 +242,14 @@ function uniqueGroups(groups: string[][]): string[][] {
     return true;
   });
 }
+
+/**
+ * よそのページ (別のオリジン) から SSTP で送られたスクリプトでは使えない \![…] ("コマンド,サブコマンド" で照合)。
+ * ukadoc の SSTP の仕様のとおり、リモートからのものはタグに強い制約をかける。喋る・表情・選択肢などはそのまま使える。
+ * ほかのゴーストやイベントを動かすもの、開く・実行する・消す・更新する・設定を変えるものを止める
+ */
+const REMOTE_BLOCKED =
+  /^(raise|notify|raiseother|notifyother|timerraise|timernotify|timerraiseother|timernotifyother|change|call|open|execute|vanishbymyself|updatebymyself|update|updateother|reload|unload|load|executesntp|biff|create),|^set,(property|wallpaper|tasktrayicon|trayballoon)$/;
 
 /** ファイル名から MIME タイプ (blob URL で開くときに要る) */
 function mimeOf(path: string): string {
@@ -358,6 +368,8 @@ export class Ghost implements PlayerHost {
   /** 開いている・順番待ちの入力ボックスの種類 (Status の opening(…)) */
   private readonly openInputs: string[] = [];
   private readonly blobUrls = new Map<string, string>();
+  /** \![open,dialog,save] で返した download/ のパス (そこへ書かれたらダウンロードにする) */
+  private readonly saveTargets = new Set<string>();
   private readonly sounds = new Map<string, Sound>();
   private userName?: string;
   private previous?: GhostIdentity;
@@ -394,6 +406,11 @@ export class Ghost implements PlayerHost {
   private readonly defaultSurfaces = new Map<number, number>();
   /** 再生中のスクリプトの由来 */
   private context: ScriptContext = {};
+
+  /** 再生中のスクリプトが、よそのページから SSTP で送られたもの (REMOTE_BLOCKED の \![…] と \j は使えない) */
+  private get fromRemote(): boolean {
+    return !!this.context.kinds?.includes('remote');
+  }
   /** 利用者がバルーンのダブルクリックで止めた (OnOtherGhostTalk の break) */
   private broken = false;
   /** マウスが乗っているスコープと当たり判定 (OnMouseEnterAll・OnMouseEnter 用) */
@@ -871,14 +888,15 @@ export class Ghost implements PlayerHost {
     return s.join(',');
   }
 
-  async request(method: ShioriMethod, id: string, references: Reference[] = [], extra: Record<string, string> = {}): Promise<string | undefined> {
+  async request(method: ShioriMethod, id: string, references: Reference[] = [], extra: Record<string, string> = {}, secret = false): Promise<string | undefined> {
     if (this.destroyed || !this.shiori || this.shioriUnloaded) return undefined;
     const headers: Record<string, string> = { ...extra };
     const status = this.status();
     if (status) headers.Status = status;
     try {
       const res = parseResponse(await this.shiori.request(buildRequest({ method, id, references, headers })));
-      this.env.log(this, 'request', `${method} ${id}${references.length ? ` [${references.join(', ')}]` : ''}${res.value ? ` → ${res.value}` : ''}`);
+      const refs = secret ? '(入力は記録しません)' : references.join(', ');
+      this.env.log(this, 'request', `${method} ${id}${references.length ? ` [${refs}]` : ''}${res.value ? ` → ${res.value}` : ''}`);
       this.reportShioriErrors(id, res.headers);
       return res.value;
     } catch (e) {
@@ -915,7 +933,7 @@ export class Ghost implements PlayerHost {
   /** イベントを送り、返ってきたスクリプトを再生する。再生したスクリプトを返す。 */
   async raise(id: string, references: Reference[] = [], opts: RaiseOptions = {}): Promise<string | undefined> {
     if (this.leaving) return undefined;
-    const value = await this.request(opts.method ?? 'GET', id, references, opts.headers);
+    const value = await this.request(opts.method ?? 'GET', id, references, opts.headers, opts.secret);
     if (!value || this.leaving) return undefined;
     if (opts.ifIdle && this.busy) return undefined;
     const played = this.playScript(value, { event: id, refs: references, kinds: opts.kinds, noTranslate: opts.noTranslate });
@@ -2055,7 +2073,8 @@ export class Ghost implements PlayerHost {
       sticky: this.stickyGroups.map((g) => g.join(',')).join(';'),
       zorder: this.zorderGroups.map((g) => g.join(',')).join(';'),
       saved: props,
-      logs: (kind) => this.env.logs(kind),
+      // ほかのゴーストのログ (SHIORI に送った値など) は見せない
+      logs: (kind) => this.env.logs(kind).filter((l) => l.name === this.name),
       setSurface: (scope, id) => void this.setSurface(scope, id),
       playAnimation: (scope, id) => this.playAnimation(scope, id),
       setDefaultSurface: (scope, id) => this.defaultSurfaces.set(scope, id),
@@ -2164,6 +2183,10 @@ export class Ghost implements PlayerHost {
     const arg = a.map((s) => s.trim());
     const cmd = (arg[0] ?? '').toLowerCase();
     const sub = (arg[1] ?? '').toLowerCase();
+    if (this.fromRemote && REMOTE_BLOCKED.test(`${cmd},${sub}`)) {
+      this.env.log(this, 'error', `よそのページからの SSTP のスクリプトでは使えません: \\![${arg.slice(0, 2).join(',')}]`);
+      return;
+    }
     const raiseEvent = hasOption(arg, 'raise-event');
     switch (cmd) {
       case 'raise':
@@ -2475,9 +2498,10 @@ export class Ghost implements PlayerHost {
     const extra = type === 'slider' ? `${req.min ?? 0},${req.max ?? 100}` : '';
     const res = await this.openInput(req);
     if ('value' in res) {
-      if (/^On/.test(id)) await this.raise(id, [res.value, extra, ...refs]);
+      const secret = type === 'password';
+      if (/^On/.test(id)) await this.raise(id, [res.value, extra, ...refs], { secret });
       else if (type === 'textarea') await this.raise('OnTextAreaInput', [id, res.value, '', ...refs]);
-      else await this.raise('OnUserInput', [id, res.value, extra, ...refs]);
+      else await this.raise('OnUserInput', [id, res.value, extra, ...refs], { secret });
       return;
     }
     if (type === 'textarea') {
@@ -2511,6 +2535,8 @@ export class Ghost implements PlayerHost {
       }
       value = paths.join('|');
     }
+    // 名前を聞いて返したパスだけ、書かれたらダウンロードにする (ほかの download/ への書き込みは普通のファイル)
+    if (kind === 'save' && value) this.saveTargets.add(normalizePath(`ghost/master/${value}`));
     await this.raise(event, [kind, id, value]);
   }
 
@@ -3009,8 +3035,7 @@ export class Ghost implements PlayerHost {
     let body = '';
     if (req.nofile !== undefined) body = nofileText(res.data, req.nofile);
     else if (res.data) {
-      const name = req.file || decodeURIComponent(new URL(req.url, location.href).pathname.split('/').pop() || 'index.html');
-      const path = `ghost/master/var/${name.replace(/[\\:*?"<>|]/g, '_')}`;
+      const path = `ghost/master/var/${httpFileName(req.file || new URL(req.url, location.href).pathname.split('/').pop() || '')}`;
       this.saveFile(path, res.data);
       body = path.slice('ghost/master/'.length);
     }
@@ -3413,8 +3438,8 @@ export class Ghost implements PlayerHost {
         this.blobUrls.delete(key);
       }
     }
-    // \![open,dialog,save] で返したパスへの書き込みは、ダウンロードにする
-    if (p.startsWith('ghost/master/download/')) download(p.slice('ghost/master/download/'.length), data);
+    // \![open,dialog,save] で返したパスへの書き込みは、ダウンロードにする (1回だけ。ゴーストが勝手にダウンロードさせられないように)
+    if (this.saveTargets.delete(p)) download(p.slice('ghost/master/download/'.length), data);
     void writePackageFile(this.key, p, data).catch((e) => console.warn('[save]', e));
   }
 
@@ -3604,12 +3629,34 @@ export class Ghost implements PlayerHost {
 
   /** \j・\![open,browser]。http・https・mailto はそのまま、file:/// とゴーストの中のパスはそのファイルを開く */
   openUrl(url: string): void {
+    if (this.fromRemote) {
+      this.env.log(this, 'error', `よそのページからの SSTP のスクリプトでは開けません: ${url}`);
+      return;
+    }
     if (/^(https?|mailto):/i.test(url)) {
       window.open(url, '_blank', 'noopener');
       return;
     }
-    const local = this.blobUrl(url.replace(/^file:\/\/\/?/i, ''));
+    const local = this.pageUrl(url.replace(/^file:\/\/\/?/i, ''));
     if (local) window.open(local, '_blank', 'noopener');
+  }
+
+  /**
+   * ゴーストのファイルを新しいタブで開くときの URL。blob: の URL はこのページと同じオリジンになるので、
+   * スクリプトを動かせる種類 (HTML・SVG・XML など) はページとして開かず、テキストとして見せる
+   */
+  private pageUrl(path: string): string | undefined {
+    const f = this.ghostFile(path);
+    if (!f) return undefined;
+    const type = mimeOf(f.path);
+    if (/^(image\/(png|jpeg|gif|bmp|webp|x-icon)|audio\/|video\/|application\/pdf|text\/plain)/.test(type)) return this.blobUrl(path);
+    const key = `${f.path}|text`;
+    let url = this.blobUrls.get(key);
+    if (!url) {
+      url = URL.createObjectURL(new Blob([f.data as BlobPart], { type: 'text/plain; charset=utf-8' }));
+      this.blobUrls.set(key, url);
+    }
+    return url;
   }
 
   /** \_b の画像。伺かの透過規則 (左上の色・.pna) と --clipping を当ててから URL にする */

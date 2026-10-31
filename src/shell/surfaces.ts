@@ -135,6 +135,10 @@ function splitBlocks(text: string): Block[] {
   return blocks;
 }
 
+/** ID 指定の1つの範囲 (5-9 など) で展開する数の上限と、全体の上限 */
+const MAX_ID_RANGE = 100_000;
+const MAX_IDS = 200_000;
+
 /** `0,2,5-9,!7` のような ID 指定を展開する。 */
 export function parseIdSpec(spec: string): number[] {
   const include = new Set<number>();
@@ -148,7 +152,10 @@ export function parseIdSpec(spec: string): number[] {
     if (!m) continue;
     const from = Number(m[1]);
     const to = m[2] !== undefined ? Number(m[2]) : from;
-    for (let n = Math.min(from, to); n <= Math.max(from, to); n++) (neg ? exclude : include).add(n);
+    // surface0-16000000 のような指定で固まらないように、1つの範囲と全体の数に上限を設ける
+    const lo = Math.min(from, to);
+    const hi = Math.min(Math.max(from, to), lo + MAX_ID_RANGE - 1);
+    for (let n = lo; n <= hi && include.size + exclude.size < MAX_IDS; n++) (neg ? exclude : include).add(n);
   }
   return [...include].filter((n) => !exclude.has(n));
 }

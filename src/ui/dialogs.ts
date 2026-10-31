@@ -425,7 +425,7 @@ export interface OptionsModel {
   /** 音声合成で読み上げる */
   speech: boolean;
   /** 他のゴーストが SSTP などで割り込むのを受ける */
-  acceptSstp: boolean;
+  acceptRemoteSstp: boolean;
   /** 音声認識で話しかける */
   voiceRecognition: boolean;
 }
@@ -475,7 +475,7 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
   const check = (checked: boolean) => el('input', { type: 'checkbox', className: 'check-input', checked });
   const speech = check(model.speech);
   const voice = check(model.voiceRecognition);
-  const sstp = check(model.acceptSstp);
+  const sstp = check(model.acceptRemoteSstp);
   /** 見出しと、そのページのヘルプ (?) */
   const page = (title: string, id: string) => {
     const h = section(title);
@@ -508,7 +508,7 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
     field('喋った言葉を読み上げる', speech, 'ブラウザの音声合成を使います (\\__v[disable] の所は読みません)'),
     field('声で話しかける', voice, 'ブラウザの音声認識を使います (Chrome など。マイクの許可が要ります)'),
     page('連携', 'network'),
-    field('よそのページからの SSTP を受ける', sstp, 'ほかのページやアプリが postMessage で送る SSTP を、ゴーストに渡します'),
+    field('よそのページからの SSTP を受ける', sstp, 'ほかのサイトのページが postMessage で送る SSTP を、ゴーストに渡します。そのスクリプトでは、開く・実行する・ほかのゴーストやイベントを動かすことはできません'),
     page('ユーザー', 'setup'),
     field('呼び名', user, 'ゴーストがあなたの呼び名を知らないときに使います'),
   );
@@ -525,7 +525,7 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
       balloonScale: clamp(balloonScale.valueAsNumber, LIMITS.scale) / 100,
       userName: user.value.trim() || model.userName,
       speech: speech.checked,
-      acceptSstp: sstp.checked,
+      acceptRemoteSstp: sstp.checked,
       voiceRecognition: voice.checked,
     };
     // 先に閉じてから保存する (保存の結果はダイアログの外の通知で知らせるため)

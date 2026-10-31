@@ -134,7 +134,8 @@ export async function runHttp(req: HttpRequest, signal?: AbortSignal, onChunk?: 
   signal?.addEventListener('abort', () => controller?.abort());
   try {
     const method = req.method === 'get' && req.rss ? 'GET' : req.method.toUpperCase();
-    const res = await fetch(url, { method, headers, body: data, signal: controller?.signal });
+    // 取得先はゴーストが決めるので、このページのクッキーは付けない (SSP の http-get にもブラウザのクッキーは無い)
+    const res = await fetch(url, { method, headers, body: data, signal: controller?.signal, credentials: 'omit' });
     let bytes: Uint8Array;
     const reader = onChunk ? res.body?.getReader() : undefined;
     if (reader) {
@@ -202,4 +203,22 @@ export function parseFeed(data: Uint8Array): string[] | undefined {
       text(it, 'description', 'summary', 'content').replace(/\r\n|\r|\n/g, ' '),
     ].join('\x01');
   });
+}
+
+/**
+ * \![execute,http-get,…] で保存する var/ の中の名前。%xx は戻すが、戻せなければそのまま。
+ * .. や空の部分は除き、var/ の外 (シェル・download/ など) へ出られないようにする
+ */
+export function httpFileName(raw: string): string {
+  let name = raw;
+  try {
+    name = decodeURIComponent(raw);
+  } catch {
+    // 壊れた %xx はそのまま
+  }
+  const parts = name
+    .split(/[\\/]/)
+    .filter((s) => s && s !== '.' && s !== '..')
+    .map((s) => s.replace(/[:*?"<>|]/g, '_'));
+  return parts.join('/') || 'index.html';
 }

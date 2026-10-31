@@ -216,7 +216,8 @@ engawa.raise('OnBoot');
 await engawa.sstp('SEND SSTP/1.4\r\nSender: テスト\r\nScript: \\0やあ\\e\r\n\r\n');
 ```
 
-よそのページやフレームからは `postMessage` で SSTP を送れます (オプションの「よそのページからの SSTP を受ける」を切ると 420 Refuse を返します)。
+よそのページやフレームからは `postMessage` で SSTP を送れます。ただし既定では受けず (420 Refuse)、オプションの「よそのページからの SSTP を受ける」を入れたときだけ受けます。
+SSP がリモートからの SSTP を制限するのと同じく、よそのページから送られたスクリプトでは、開く・実行する (`\j`・`\![open,…]`・`\![execute,…]`)、ほかのゴーストやイベントを動かす (`\![raise,…]`・`\![change,…]` など)、消滅・更新・設定の変更は使えません。EXECUTE も名前・版・状態とクッキーだけを答えます (クッキーは送り元のオリジンごと)。
 
 ```js
 engawaWindow.postMessage({ type: 'sstp', id: 1, request: 'NOTIFY SSTP/1.1\r\nSender: アプリ\r\nEvent: OnMusicPlay\r\nReference0: 曲名\r\n\r\n' }, '*');

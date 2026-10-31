@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { httpEvent, parseHttp } from '../src/ghost/http';
+import { httpEvent, httpFileName, parseHttp } from '../src/ghost/http';
 import { anchorPoint, moveTarget, parseMove } from '../src/ghost/move';
 import { readProperty, writeProperty, type PropertyHost } from '../src/ghost/properties';
 import { randomWord } from '../src/ghost/words';
@@ -27,6 +27,12 @@ describe('ネットワーク更新の一覧', () => {
     expect(txt).toEqual([{ path: 'shell/master/surface0.png', md5: '36a92cc94a9e0fa21f625f8bfb007adf' }]);
   });
 
+  it('%xx を戻してから危ないパスを除く (シェルの更新からゴースト本体を書き換えられないように)', () => {
+    const md5 = 'd41d8cd98f00b204e9800998ecf8427e';
+    const list = parseUpdateList(bytes([`%2e%2e/%2e%2e/ghost/master/shiori.js\x01${md5}\x01`, `%2E%2E%5Cx.dic\x01${md5}\x01`, `%2Fabs.txt\x01${md5}\x01`, `c%3A/x.txt\x01${md5}\x01`, `a%20b.png\x01${md5}\x01`].join('\r\n')));
+    expect(list.map((e) => e.path)).toEqual(['a b.png']);
+  });
+
   it('取得先は http(s) の homeurl に / を足したもの', () => {
     expect(updateBase('https://example.com/ghost')).toBe('https://example.com/ghost/');
     expect(updateBase('ftp://example.com/')).toBeUndefined();
@@ -41,6 +47,16 @@ describe('\\![execute,http-…]', () => {
     expect(httpEvent(r, false)).toBe('OnDoneFailure');
     expect(httpEvent(parseHttp('rss-get', ['https://example.com/feed'])!, true)).toBe('OnExecuteRSSComplete');
     expect(parseHttp('http-fly', ['x'])).toBeUndefined();
+  });
+
+  it('--file の名前は var/ の中だけ (.. や download/ へは出られない。壊れた %xx でも止まらない)', () => {
+    expect(httpFileName('log.json')).toBe('log.json');
+    expect(httpFileName('cache/a.txt')).toBe('cache/a.txt');
+    expect(httpFileName('../download/setup.exe')).toBe('download/setup.exe');
+    expect(httpFileName('..%2F..%2Fshell%2Fmaster%2Fsurface0.png')).toBe('shell/master/surface0.png');
+    expect(httpFileName('100%')).toBe('100%');
+    expect(httpFileName('a:b?.txt')).toBe('a_b_.txt');
+    expect(httpFileName('')).toBe('index.html');
   });
 });
 

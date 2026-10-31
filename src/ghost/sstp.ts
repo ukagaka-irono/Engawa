@@ -119,8 +119,9 @@ async function idle(g: Ghost, ms = 30_000): Promise<boolean> {
 
 /**
  * SSTP の要求を処理して応答を返す。local は同じページから (window.engawa.sstp)。
+ * origin はよそのページから postMessage で送られたときの送り元 (SSTP のクッキーを送り元ごとに分ける)
  */
-export async function handleSstp(text: string, host: SstpHost, local: boolean): Promise<string> {
+export async function handleSstp(text: string, host: SstpHost, local: boolean, origin = ''): Promise<string> {
   const req = parseSstp(text);
   if (!req) return response(400);
   const v = Number(req.version);
@@ -133,7 +134,7 @@ export async function handleSstp(text: string, host: SstpHost, local: boolean): 
   const kinds = [req.method === 'COMMUNICATE' ? 'communicate' : 'sstp-send', ...(owned ? ['owned'] : []), ...(local || owned ? [] : ['remote'])];
   const securityLevel = local || owned ? (header(req, 'SecurityLevel') ?? 'local') : 'external';
 
-  if (req.method === 'EXECUTE') return execute(req, host, local, sender ?? '');
+  if (req.method === 'EXECUTE') return execute(req, host, local, local ? (sender ?? '') : `${origin}\x01${sender ?? ''}`);
 
   const g = target(req, host);
   if (g === null) return response(404);
@@ -182,11 +183,19 @@ export async function handleSstp(text: string, host: SstpHost, local: boolean): 
   return response(501);
 }
 
+/**
+ * よそのページからの EXECUTE で使えるもの。名前・版・状態だけを答える。
+ * プロパティ (developer.log に入力の中身なども入る) や設定の変更、ファイルの書き出しは同じページからだけ
+ */
+const REMOTE_EXECUTE = new Set(['getname', 'getghostname', 'getshellname', 'getballoonname', 'getversion', 'getshortversion', 'getstatus', 'setcookie', 'getcookie', 'quiet', 'restore']);
+
+/** sender はクッキーの持ち主 (よそのページからは送り元のオリジンと Sender の組) */
 async function execute(req: SstpRequest, host: SstpHost, local: boolean, sender: string): Promise<string> {
   const raw = header(req, 'Command') ?? '';
   const m = /^([\w]+)(?:\[(.*)\])?$/.exec(raw.trim());
   if (!m) return response(400);
   const command = m[1].toLowerCase();
+  if (!local && !REMOTE_EXECUTE.has(command)) return response(420);
   const params = m[2] !== undefined ? m[2].split(',') : references(req).map(String);
   const g = target(req, host);
   const all = host.installed();

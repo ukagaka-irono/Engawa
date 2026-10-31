@@ -493,7 +493,8 @@ export class GhostManager implements GhostEnv {
     if (/^https?:/i.test(url)) {
       let data: Uint8Array;
       try {
-        const res = await fetch(url);
+        // 取得先はゴーストが決めるので、このページのクッキーは付けない
+        const res = await fetch(url, { credentials: 'omit' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = new Uint8Array(await res.arrayBuffer());
       } catch (e) {
@@ -502,7 +503,13 @@ export class GhostManager implements GhostEnv {
         this.toasts.show(`「${url}」を取得できませんでした: ${reason}`, { error: true });
         return;
       }
-      const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'download.nar');
+      const last = new URL(url).pathname.split('/').pop() || 'download.nar';
+      let name = last;
+      try {
+        name = decodeURIComponent(last);
+      } catch {
+        // 壊れた %xx はそのまま
+      }
       await ghost.raise('OnURLDropped', [name, url, 0], { wait: true });
       await this.install(() => filesFromZip(data), name);
       return;
@@ -557,7 +564,7 @@ export class GhostManager implements GhostEnv {
       ghosts: () => this.ghosts,
       current: () => this.current,
       installed: () => this.packages,
-      refused: () => !settings.acceptSstp,
+      refused: () => !settings.acceptRemoteSstp,
       cookies: this.sstpCookies,
       saveCookies: () => {
         try {
@@ -571,8 +578,8 @@ export class GhostManager implements GhostEnv {
   }
 
   /** SSTP の要求を処理する (local は同じページから) */
-  sstp(request: string, local = true): Promise<string> {
-    return handleSstp(request, this.sstpHost(), local);
+  sstp(request: string, local = true, origin = ''): Promise<string> {
+    return handleSstp(request, this.sstpHost(), local, origin);
   }
 
   // ---------------------------------------------------------------- 起動
@@ -1201,7 +1208,7 @@ export class GhostManager implements GhostEnv {
         balloonScale: settings.balloonScale,
         userName: settings.userName,
         speech: settings.speech,
-        acceptSstp: settings.acceptSstp,
+        acceptRemoteSstp: settings.acceptRemoteSstp,
         voiceRecognition: settings.voiceRecognition ?? false,
       },
       {
@@ -1363,7 +1370,7 @@ export class GhostManager implements GhostEnv {
       const d = e.data as { type?: unknown; request?: unknown; id?: unknown } | null;
       if (!d || d.type !== 'sstp' || typeof d.request !== 'string') return;
       const local = e.origin === location.origin && e.source === window;
-      void this.sstp(d.request, local).then((response) => {
+      void this.sstp(d.request, local, e.origin).then((response) => {
         const target = e.source as Window | null;
         target?.postMessage({ type: 'sstp-response', id: d.id, response }, { targetOrigin: e.origin && e.origin !== 'null' ? e.origin : '*' });
       });

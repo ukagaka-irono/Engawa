@@ -103,6 +103,20 @@ describe('SSTP', () => {
     expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: x', 'Command: Unknown'), h, true)).toContain('501');
   });
 
+  it('よそのページからの EXECUTE は名前・状態だけ。プロパティ (ログなど) は読めず、クッキーは送り元ごと', async () => {
+    const a = fakeGhost('A', 'あ', 'い');
+    const h = host([a.ghost]);
+    expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: x', 'Command: GetName'), h, false, 'https://a.example')).toContain('あ,い');
+    expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: x', 'Command: GetProperty[developer.log.request.index(0).value]'), h, false, 'https://a.example')).toContain('420');
+    expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: x', 'Command: SetProperty[currentghost.x,1]'), h, false, 'https://a.example')).toContain('420');
+    // 同じ Sender を名乗っても、ほかのオリジンやこのページのクッキーは読めない
+    await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: アプリ', 'Command: SetCookie[k,local]'), h, true);
+    await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: アプリ', 'Command: SetCookie[k,a]'), h, false, 'https://a.example');
+    expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: アプリ', 'Command: GetCookie[k]'), h, false, 'https://b.example')).not.toMatch(/\r\n\r\n(a|local)/);
+    expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: アプリ', 'Command: GetCookie[k]'), h, false, 'https://a.example')).toContain('\r\n\r\na');
+    expect(await handleSstp(req('EXECUTE SSTP/1.1', 'Sender: アプリ', 'Command: GetCookie[k]'), h, true)).toContain('\r\n\r\nlocal');
+  });
+
   it('送り主の無い SEND と、知らない版は受けない', async () => {
     const a = fakeGhost('A', 'あ', 'い');
     expect(await handleSstp(req('SEND SSTP/1.4', 'Script: x'), host([a.ghost]), true)).toContain('400');

@@ -5,6 +5,12 @@ describe('parseIdSpec', () => {
   it('expands ranges and exclusions', () => {
     expect(parseIdSpec('0,2-4,!3')).toEqual([0, 2, 4]);
   });
+
+  it('caps huge ranges so a shell cannot freeze the page', () => {
+    const ids = parseIdSpec('0-16000000');
+    expect(ids.length).toBe(100_000);
+    expect(parseIdSpec(Array.from({ length: 50 }, (_, i) => `${i * 1_000_000}-${i * 1_000_000 + 99_999}`).join(',')).length).toBe(200_000);
+  });
 });
 
 describe('parseSurfaces', () => {
