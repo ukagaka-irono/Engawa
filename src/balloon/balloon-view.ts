@@ -280,6 +280,15 @@ export class BalloonView {
   /** \n。ratio は \n[half] や \n[150] の行送り量 (1 = 1行、負の値は上へ戻る)。行揃えは左に戻る */
   newline(ratio = 1): void {
     this.endLink();
+    // \_l で右へ動かした後の改行は、SSP と同じく文字の領域の左端の次の行へ (\_l の x のまま続けない)。
+    // 2列のメニュー (左の項目 \_l[150,@0] 右の項目 \n) が重ならないように
+    if (!this.vertical && this.block !== this.text && this.block.offsetLeft > 0) {
+      const lineTop = this.block.offsetTop + this.line.offsetTop;
+      const lh = this.lineHeight();
+      const top = this.line.childNodes.length === 0 ? lineTop + ratio * lh : lineTop + this.line.offsetHeight + (ratio - 1) * lh;
+      this.startBlock(0, top);
+      return;
+    }
     if (this.line.childNodes.length === 0) {
       // 空の行は高さを持たないので、その行自体の高さで送る (負の値は次の行を上へずらす)
       if (ratio >= 0) {
@@ -375,8 +384,11 @@ export class BalloonView {
     };
     const [w, h] = this.skin.size(this.kind, this.balloonId, this.rightSide);
     const r = this.skin.textRect(this.kind, this.balloonId, this.rightSide, w, h);
-    const x = resolve(xArg, cur.x, w / 2, r.left);
-    const y = resolve(yArg, cur.y, h / 2, r.top);
+    this.startBlock(resolve(xArg, cur.x, w / 2, r.left), resolve(yArg, cur.y, h / 2, r.top));
+  }
+
+  /** 文字の領域の (x, y) から続きを書く (\_l と、その後の改行) */
+  private startBlock(x: number, y: number): void {
     const block = document.createElement('div');
     block.className = 'balloon-block';
     block.style.left = `${x}px`;
@@ -540,6 +552,7 @@ export class BalloonView {
     return parseFloat(getComputedStyle(this.text).lineHeight) || 18;
   }
 
+  /** 今の文字描画位置。x は次の文字の位置、y は今の行の上端 (文字の箱の上端は行より少し下にあり、\_l[,@0] がずれていく) */
   private cursor(): { x: number; y: number } {
     const marker = document.createElement('span');
     (this.link ?? this.line).appendChild(marker);
@@ -548,7 +561,7 @@ export class BalloonView {
     marker.remove();
     return {
       x: (r.left - base.left) / this.scale,
-      y: (r.top - base.top) / this.scale + this.text.scrollTop,
+      y: (this.line.getBoundingClientRect().top - base.top) / this.scale + this.text.scrollTop,
     };
   }
 
