@@ -386,9 +386,20 @@ function logProperty(p: string, h: PropertyHost): string | undefined {
   return l[m[4] as 'type' | 'name' | 'value'];
 }
 
+/**
+ * プロパティ名を小文字にし、scope1・index0 のような括弧の無い番号を scope(1)・index(0) にする。
+ * 華和梨は ( ) で囲んだ単語の中の括弧を消すので、『CLDSP2+』などの currentghost.scope(1).surface.num は scope1 として届く
+ */
+function canonicalPath(path: string): string {
+  return path
+    .trim()
+    .toLowerCase()
+    .replace(/\.(scope|index)(\d+)(?=\.|$)/g, '.$1($2)');
+}
+
 /** プロパティを読む。知らない名前は空文字列 */
 export function readProperty(path: string, h: PropertyHost): string {
-  const p = path.trim().toLowerCase();
+  const p = canonicalPath(path);
   const sys = systemProperty(p, h);
   if (sys !== undefined) return sys;
   const ghosts = h.installed.filter((m) => m.kind === 'ghost');
@@ -509,7 +520,7 @@ export function readProperty(path: string, h: PropertyHost): string {
 
 /** プロパティを書く ([SET有効] のもの)。書けたら true */
 export function writeProperty(path: string, value: string, h: PropertyHost): boolean {
-  const p = path.trim().toLowerCase();
+  const p = canonicalPath(path);
   let m = /^currentghost\.scope\((\d+)\)\.(surface\.num|animation\.num|seriko\.defaultsurface)$/.exec(p);
   if (m) {
     const scope = Number(m[1]);

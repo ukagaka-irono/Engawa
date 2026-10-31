@@ -11,7 +11,9 @@ export type SaoriEffect =
   /** SAORI がファイルを書いた (画像を作ったなど)。すぐに表示に使えるよう、セーブデータと同じく書き戻す */
   | { kind: 'write'; path: string; data: Uint8Array }
   /** 音声合成で読む (AquesTalk の代わり)。stop なら止める。rate は速さの倍率 */
-  | { kind: 'speak'; text: string; rate?: number; stop?: boolean };
+  | { kind: 'speak'; text: string; rate?: number; stop?: boolean }
+  /** ゴーストにイベントを送る (SAORI over DirectSSTP の --async の結果) */
+  | { kind: 'event'; id: string; refs: string[] };
 
 /** SAORI が知りたい、ブラウザとページの様子。メインスレッドが読み込みのとき (と変わったとき) に送る */
 export interface SaoriEnv {

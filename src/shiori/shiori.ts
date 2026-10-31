@@ -22,6 +22,8 @@ export interface Shiori {
   unload(): Promise<void>;
   /** Engawa がゴーストのフォルダに書いたファイル (HTTP の --file など。パスはゴーストルートから) を、SHIORI からも読めるようにする */
   putFile?(path: string, data: Uint8Array): void;
+  /** SHIORI が書いたファイルを、いまメインスレッドに書き戻す (書いたらすぐ届くものは持たない) */
+  flush?(): Promise<void>;
 }
 
 /**

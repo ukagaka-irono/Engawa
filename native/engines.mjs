@@ -69,21 +69,40 @@ export const ENGINES = [
   {
     name: 'kawari',
     label: '華和梨',
-    licenses: [{ title: '華和梨 8 (修正 BSD)', file: 'LICENSE' }],
-    repo: 'https://github.com/kawari/kawari.git',
-    commit: '3d21bdc4c7249175388606899bad6fe9ce955d86',
-    // build/src/files.mak と gcc.mak (MACH_TYPE=js) と同じ。DLL の SAORI (SAORI_NATIVE) は gcc.mak の Linux 向けと同じく入れる
-    // (dlopen は native/shim/engawa_saori.c が受ける)。ソースは EUC-JP だが、ASCII でないのはコメントだけ
+    licenses: [
+      { title: '華和梨 9 (BSD 2-Clause)', file: 'LICENSE' },
+      { title: 'uka_regexp (パブリックドメイン)', file: 'build/src/uka_regexp/LICENSE' },
+    ],
+    // 華和梨 Phase 9 (Ukagaka Tech Team による、華和梨 8 の後継)。8 の辞書をそのまま読める (README の「華和梨 8 からの乗り換え」)。
+    // 新しいゴースト (『CLDSP2+』など) は 9 を同梱していて、8 とは ( ) を含む単語の読み方などが違う
+    repo: 'https://github.com/ukatech/kawari.git',
+    commit: 'cb8a52ab5c4f88b26cafb1646415ec9688cfb32f',
+    // build/src/files.mak と gcc.mak・gcc-mach.mak (MACH_TYPE=js) と同じ。DLL の SAORI (SAORI_NATIVE) は gcc.mak の既定どおり入れる
+    // (dlopen は native/shim/engawa_saori.c が受ける)。正規表現は submodule の uka_regexp、文字コードの変換は Emscripten の iconv
     defines: ['NDEBUG', 'ENABLE_SAORI_NATIVE'],
+    undefines: ['WIN32', '_WIN32', '_Windows', '__CYGWIN__'],
     includes: ['build/src'],
     cxxflags: ['-std=c++11', '-Wno-everything'],
+    edits: {
+      // 本体との Direct SSTP (SAORI over DirectSSTP の callsaori "internal_…" など) は、js では送れないことになっている。
+      // Engawa の内蔵モジュール (src/saori/internal.ts) に送る (native/shim/engawa_saori.c の engawa_direct_sstp)
+      'build/src/misc/dsstp.cpp': [
+        [
+          'bool TBasewareLink::Send(const string &request, string &response, unsigned int timeout_ms) const\n{\n\tresponse.erase();\n\treturn false;\n}',
+          'bool TBasewareLink::Send(const string &request, string &response, unsigned int timeout_ms) const\n{\n\tresponse.erase();\n\tif (handle==0) return false;\n\tlong n=0;\n\tchar *res=engawa_direct_sstp(request.data(), static_cast<int>(request.size()), &n);\n\tif (!res) return false;\n\tresponse.assign(res, static_cast<size_t>(n));\n\tstd::free(res);\n\treturn !response.empty();\n}',
+        ],
+        ['#include "misc/dsstp.h"', '#include "misc/dsstp.h"\n#include <cstdlib>'],
+      ],
+    },
     sources: [
-      ...['kawari_engine', 'kawari_ns', 'kawari_dict', 'kawari_code', 'kawari_codeset', 'kawari_codeexpr', 'kawari_codekis', 'kawari_vm', 'kawari_lexer', 'kawari_compiler', 'kawari_log', 'kawari_rc', 'kawari_crypt'].map(
-        (n) => `build/src/libkawari/${n}.cpp`,
-      ),
-      ...['misc', 'mt19937ar', 'l10n', 'phttp', 'base64'].map((n) => `build/src/misc/${n}.cpp`),
-      ...['saori', 'saori_module', 'saori_unique', 'saori_native'].map((n) => `build/src/saori/${n}.cpp`),
-      ...['echo', 'dict', 'date', 'counter', 'file', 'escape', 'urllist', 'substitute', 'split', 'communicate', 'xargs', 'string', 'help', 'saori', 'system'].map(
+      ...[
+        'kawari_engine', 'kawari_ns', 'kawari_dict', 'kawari_code', 'kawari_codeset', 'kawari_codeexpr', 'kawari_codekis', 'kawari_vm', 'kawari_lexer',
+        'kawari_compiler', 'kawari_log', 'kawari_diag', 'kawari_lint', 'kawari_rc', 'kawari_crypt',
+      ].map((n) => `build/src/libkawari/${n}.cpp`),
+      ...['misc', 'mt19937ar', 'phttp', 'dsstp', 'base64', 'charset', 'wfile'].map((n) => `build/src/misc/${n}.cpp`),
+      'build/src/uka_regexp/uka_regexp.cpp',
+      ...['saori', 'saori_module', 'saori_dsstp', 'saori_unique', 'saori_native'].map((n) => `build/src/saori/${n}.cpp`),
+      ...['echo', 'dict', 'date', 'counter', 'file', 'escape', 'urllist', 'substitute', 'split', 'communicate', 'xargs', 'string', 'regex', 'help', 'saori', 'sstp', 'system'].map(
         (n) => `build/src/kis/kis_${n}.cpp`,
       ),
       ...['kawari_shiori', 'shiori_object', 'shiori'].map((n) => `build/src/shiori/${n}.cpp`),

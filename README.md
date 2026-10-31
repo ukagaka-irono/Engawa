@@ -87,7 +87,7 @@ Internet Explorer には対応していません。
 | YAYA | yaya.dll | [YAYA-shiori/yaya-shiori](https://github.com/YAYA-shiori/yaya-shiori) |
 | 文 (AYA5) | aya5.dll | [ponapalt/aya5-shiori](https://github.com/ponapalt/aya5-shiori) |
 | 里々 | satori.dll | [ukatech/satoriya-shiori](https://github.com/ukatech/satoriya-shiori) |
-| 華和梨 8 | shiori.dll (kawarirc.kis) | [kawari/kawari](https://github.com/kawari/kawari) |
+| 華和梨 9 (8 の辞書もそのまま読める) | shiori.dll (kawarirc.kis) | [ukatech/kawari](https://github.com/ukatech/kawari) (Phase 9.2.0) |
 | 華和梨 7 | shiori.dll (kawari.ini)。SHIORI/2.x で話す | [kawari/kawari7](https://github.com/kawari/kawari7) |
 | なし栞 | nashi.dll | [yanashi-interface/nashi-shiori-studio](https://github.com/yanashi-interface/nashi-shiori-studio) |
 | minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) |
@@ -118,6 +118,10 @@ Windows と同じく、SHIORI・SAORI から見たファイル名は大文字・
 ゴーストが同梱している SAORI の DLL は、DLL の中身 (書き出し表にある DLL じしんの名前) とファイル名で見分け、
 ブラウザで作り直したものに差し替えて呼びます。SHIORI が DLL を開くところ (dlopen・LoadLibrary など) を Engawa が受けるので、
 上のどの SHIORI からも、Windows と同じ書き方で呼べます。
+
+本体の内蔵モジュールを DLL なしで呼ぶ SAORI over DirectSSTP (SSP 2.9.13 から) にも答えます (いまは華和梨 9 の `callsaori "internal_…"` から)。
+Engawa が持つのは `internal_file` の `MediaInfo` (MP3・WAV・Ogg・FLAC のタグと長さ) と、`internal_system` の `ListModules`・`ListFunctions` で、
+`--async=識別子` の結果はイベントで届けます。
 
 WebAssembly にしたもの (ソースからビルドして `index.html` に組み込んでいます):
 

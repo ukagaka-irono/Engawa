@@ -2,7 +2,7 @@
  * すべての SHIORI のソースに -include で読ませる。iconv を engawa_iconv.c のものに差し替える。
  * Emscripten (musl) の iconv の Shift_JIS は JIS X 0208 だけで、Windows の CP932 にある
  * NEC 特殊文字 (①・㈱) や IBM 拡張 (ⅰ・髙)、全角チルダ (～) を変換できないため。
- * CP932 と UTF-8 の間だけを自前で変換し、それ以外は musl の iconv に任せる。
+ * CP932 と UTF-8・WCHAR_T (華和梨 9 が使う) の間だけを自前で変換し、それ以外は musl の iconv に任せる。
  */
 #ifndef ENGAWA_ICONV_H
 #define ENGAWA_ICONV_H

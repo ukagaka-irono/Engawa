@@ -485,7 +485,12 @@ export class GhostManager implements GhostEnv {
       await ghost.changeBalloon(ghost.skin.key, { force: true });
       return;
     }
-    if (w === 'ghost' || w === 'shiori' || w === 'shell' || w === 'surface' || w.startsWith('descript')) await this.restart(ghost, true);
+    // シェルはゴーストを起こし直さずに読み直す (ゴーストが書き出したサーフェスの定義を読ませることがある)
+    if (w === 'shell' || w === 'surface') {
+      await ghost.reloadShell();
+      return;
+    }
+    if (w === 'ghost' || w === 'shiori' || w.startsWith('descript')) await this.restart(ghost, true);
   }
 
   /** URL (http/https) かゴーストの中のファイルからインストールする */
@@ -946,7 +951,8 @@ export class GhostManager implements GhostEnv {
     const py = y - box.top;
     for (const ghost of [...this.ghosts].reverse()) {
       if (!ghost.alive || ghost.leaving) continue;
-      for (const scope of [0, 1, 2, 3]) {
+      // \p[2] 以降のキャラクターも (『CLDSP2+』のプレイリストなど)。重なっていれば手前のもの
+      for (const scope of ghost.visibleScopesTopFirst()) {
         const r = ghost.scopeRect(scope);
         if (r && px >= r.left && px < r.left + r.width && py >= r.top && py < r.top + r.height) return { ghost, scope };
       }

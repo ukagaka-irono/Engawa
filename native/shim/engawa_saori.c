@@ -41,6 +41,22 @@ EM_JS(char *, saori_js_request, (int id, const char *req, int len, long *out_len
   return p;
 });
 
+EM_JS(char *, dsstp_js_send, (const char *req, int len, long *out_len), {
+  var host = Module['engawaSaori'];
+  var res = host && host.directSstp ? host.directSstp(HEAPU8.slice(req, req + len)) : null;
+  if (!res) {
+    HEAP32[out_len >> 2] = 0;
+    return 0;
+  }
+  var p = _malloc(res.length + 1);
+  HEAPU8.set(res, p);
+  HEAPU8[p + res.length] = 0;
+  HEAP32[out_len >> 2] = res.length;
+  return p;
+});
+
+char *engawa_direct_sstp(const char *req, int len, long *out_len) { return dsstp_js_send(req, len, out_len); }
+
 EM_JS(int, saori_js_unload, (int id), {
   var host = Module['engawaSaori'];
   return host ? host.unload(id) : 0;

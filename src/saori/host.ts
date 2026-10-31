@@ -53,6 +53,8 @@ export interface SaoriBridge {
   request(id: number, req: Uint8Array): Uint8Array | null;
   unload(id: number): number;
   close(id: number): void;
+  /** Direct SSTP の要求 (SAORI over DirectSSTP)。答えられなければ null (SHIORI には送れなかったことになる) */
+  directSstp?(req: Uint8Array): Uint8Array | null;
 }
 
 /** engawa_saori.c の SLOTS と同じ */

@@ -1,5 +1,5 @@
 /*
- * CP932 ⇄ UTF-8 の iconv (engawa_iconv.h を参照)。表 cp932_table.h は native/build.mjs が
+ * CP932 ⇄ UTF-8 / WCHAR_T の iconv (engawa_iconv.h を参照)。表 cp932_table.h は native/build.mjs が
  * Encoding Standard の Shift_JIS デコーダ (Windows の CP932 と同じ) から作る。
  * iconv の決まりどおり、変換できない文字は EILSEQ、途中で切れた文字は EINVAL、出力が足りなければ E2BIG で、
  * そのとき *in は問題の文字を指したままにする。
@@ -14,13 +14,15 @@
 
 #include "cp932_table.h"
 
-enum { TO_UTF8 = 1, FROM_UTF8 = 2 };
+/* 変換の片側。CP932 と、UTF-8 か WCHAR_T (wasm の wchar_t は 4 バイトのリトルエンディアン。華和梨 9 が使う) の間を変換する */
+enum { K_CP932 = 1, K_UTF8 = 2, K_WCHAR = 3 };
 
 /* engawa_iconv_open が返したものか見分けるため、自分の変換器は先頭に印を持つ */
 #define MAGIC 0x45474157 /* 'EGAW' */
 struct cd {
   int magic;
-  int dir;
+  int from;
+  int to;
 };
 
 static int name_is(const char *name, const char *const *list) {
@@ -33,6 +35,11 @@ static int name_is(const char *name, const char *const *list) {
 
 static const char *const CP932_NAMES[] = {"CP932", "WINDOWS-31J", "SHIFT_JIS", "SHIFT-JIS", "SJIS", "MS932", "MS_KANJI", "CSSHIFTJIS", "CSWINDOWS31J", 0};
 static const char *const UTF8_NAMES[] = {"UTF-8", "UTF8", 0};
+static const char *const WCHAR_NAMES[] = {"WCHAR_T", "UCS-4LE", "UTF-32LE", 0};
+
+static int kind_of(const char *name) {
+  return name_is(name, CP932_NAMES) ? K_CP932 : name_is(name, UTF8_NAMES) ? K_UTF8 : name_is(name, WCHAR_NAMES) ? K_WCHAR : 0;
+}
 
 static struct cd *ours(iconv_t cd) {
   struct cd *c = (struct cd *)cd;
@@ -42,17 +49,17 @@ static struct cd *ours(iconv_t cd) {
 }
 
 iconv_t engawa_iconv_open(const char *to, const char *from) {
-  int dir = 0;
-  if (name_is(from, CP932_NAMES) && name_is(to, UTF8_NAMES)) dir = TO_UTF8;
-  else if (name_is(from, UTF8_NAMES) && name_is(to, CP932_NAMES)) dir = FROM_UTF8;
-  if (!dir) return iconv_open(to, from);
+  int f = kind_of(from), t = kind_of(to);
+  /* 片側が CP932 で、もう片側が UTF-8 か WCHAR_T のときだけ自前で変換する */
+  if (!f || !t || f == t || (f != K_CP932 && t != K_CP932)) return iconv_open(to, from);
   struct cd *c = (struct cd *)malloc(sizeof *c);
   if (!c) {
     errno = ENOMEM;
     return (iconv_t)-1;
   }
   c->magic = MAGIC;
-  c->dir = dir;
+  c->from = f;
+  c->to = t;
   return (iconv_t)c;
 }
 
@@ -165,6 +172,22 @@ static int decode_utf8(const unsigned char *in, size_t left, unsigned *cp) {
   return n;
 }
 
+/* WCHAR_T (4 バイトのリトルエンディアン) の1文字を読む。読んだバイト数 (0 = 不正、-1 = 途中で切れている) */
+static int decode_wchar(const unsigned char *in, size_t left, unsigned *cp) {
+  if (left < 4) return -1;
+  *cp = (unsigned)in[0] | ((unsigned)in[1] << 8) | ((unsigned)in[2] << 16) | ((unsigned)in[3] << 24);
+  if (*cp > 0x10ffff || (*cp >= 0xd800 && *cp <= 0xdfff)) return 0;
+  return 4;
+}
+
+static int encode_wchar(unsigned cp, unsigned char *out) {
+  out[0] = (unsigned char)(cp & 0xff);
+  out[1] = (unsigned char)((cp >> 8) & 0xff);
+  out[2] = (unsigned char)((cp >> 16) & 0xff);
+  out[3] = (unsigned char)(cp >> 24);
+  return 4;
+}
+
 size_t engawa_iconv(iconv_t cd, char **in, size_t *inleft, char **out, size_t *outleft) {
   struct cd *c = ours(cd);
   if (!c) return iconv(cd, in, inleft, out, outleft);
@@ -173,7 +196,7 @@ size_t engawa_iconv(iconv_t cd, char **in, size_t *inleft, char **out, size_t *o
   while (*inleft > 0) {
     const unsigned char *src = (const unsigned char *)*in;
     unsigned cp;
-    int n = c->dir == TO_UTF8 ? engawa_cp932_to_unicode(src, *inleft, &cp) : decode_utf8(src, *inleft, &cp);
+    int n = c->from == K_CP932 ? engawa_cp932_to_unicode(src, *inleft, &cp) : c->from == K_UTF8 ? decode_utf8(src, *inleft, &cp) : decode_wchar(src, *inleft, &cp);
     if (n == 0) {
       errno = EILSEQ;
       return (size_t)-1;
@@ -183,7 +206,7 @@ size_t engawa_iconv(iconv_t cd, char **in, size_t *inleft, char **out, size_t *o
       return (size_t)-1;
     }
     unsigned char buf[4];
-    int m = c->dir == TO_UTF8 ? encode_utf8(cp, buf) : engawa_unicode_to_cp932(cp, buf);
+    int m = c->to == K_CP932 ? engawa_unicode_to_cp932(cp, buf) : c->to == K_UTF8 ? encode_utf8(cp, buf) : encode_wchar(cp, buf);
     if (m == 0) {
       errno = EILSEQ;
       return (size_t)-1;

@@ -65,11 +65,9 @@ export class CharacterLayer {
     const dragging = this.active?.view;
     if (dragging?.hit(e.clientX, e.clientY)) return dragging;
     if (!this.onDesktop(e.target)) return undefined;
-    // 後から追加したものほど上に描かれる
-    for (let i = this.views.length - 1; i >= 0; i--) {
-      if (this.views[i].hit(e.clientX, e.clientY)) return this.views[i];
-    }
-    return undefined;
+    // 描かれている順 (\![set,zorder] などの z-index が大きいものが上。同じなら後から追加したものが上) に調べる
+    const order = this.views.map((view, i) => ({ view, i, z: Number(view.el.style.zIndex) || 0 })).sort((a, b) => b.z - a.z || b.i - a.i);
+    return order.find(({ view }) => view.hit(e.clientX, e.clientY))?.view;
   }
 
   private setHovered(view: CharacterView | undefined, e: PointerInput): void {

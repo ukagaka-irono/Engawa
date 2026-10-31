@@ -42,7 +42,8 @@ export class NativeShiori extends WorkerShiori implements Shiori {
     const files = [...this.files.sub('ghost/master').entries()];
     // WebAssembly にした SAORI は、SHIORI が開く前に Worker の中で作っておく。里々は ssu.dll を自分の中のもので呼ぶ
     const saori = await planWasmSaori(this.files, this.name, this.engine.id === 'satori' ? ['ssu'] : []);
-    await this.start(new NativeWorker(), { type: 'load', engine: this.engine.id, wasm, files, env: readSaoriEnv(), saori } as never, [wasm.buffer]);
+    const shellDirs = this.files.dirs('shell');
+    await this.start(new NativeWorker(), { type: 'load', engine: this.engine.id, wasm, files, env: readSaoriEnv(), saori, shellDirs } as never, [wasm.buffer]);
     document.addEventListener('visibilitychange', this.flushOnHide);
     window.addEventListener('pagehide', this.flushOnHide);
     window.addEventListener('resize', this.sendEnv);
@@ -66,6 +67,11 @@ export class NativeShiori extends WorkerShiori implements Shiori {
     const declared = /^Charset:[ \t]*([\w-]+)/im.exec(head)?.[1];
     if (declared) this.charset = normalizeCharset(declared) === 'shift_jis' ? 'Shift_JIS' : declared;
     return decodeText(res, declared ?? this.charset);
+  }
+
+  /** SHIORI が書いたファイルをいま書き戻す (\![reload,shell] の前など) */
+  async flush(): Promise<void> {
+    await this.call({ type: 'flush' }, REQUEST_TIMEOUT_MS).catch(() => {});
   }
 
   unload(): Promise<void> {

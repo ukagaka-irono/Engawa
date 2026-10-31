@@ -21,6 +21,7 @@ import { joinPath, normalizePath, type FileTree } from '../vfs/files';
 import { writePackageFile, type PackageMeta } from '../vfs/storage';
 import type { GhostListEntry } from './ghostlist';
 import { httpEvent, httpFileName, nofileText, parseFeed, parseHttp, runHttp, type HttpRequest } from './http';
+import { seekTime } from './sound-options';
 import { calendarRefs, parseICal, parseScheduleDate, type CalEvent } from './ical';
 import { moveTarget, parseMove, type Rect } from './move';
 import { rateOfUse, readProperty, writeProperty, type LogEntry, type PropertyHost, type SoundInfo } from './properties';
@@ -1279,6 +1280,12 @@ export class Ghost implements PlayerHost {
     return [...this.scopes].filter(([, s]) => s.renderer.visible && s.view.placed).map(([i]) => i);
   }
 
+  /** 表示しているスコープを、手前 (Z 順の上) のものから */
+  visibleScopesTopFirst(): number[] {
+    const z = (i: number) => Number(this.scopes.get(i)?.view.el.style.zIndex) || 0;
+    return this.visibleScopes().sort((a, b) => z(b) - z(a) || a - b);
+  }
+
   /** キャラクターの矩形 (他のゴーストの \![move] の基準などに使う) */
   scopeRect(index: number): Rect | undefined {
     const s = this.scopes.get(index);
@@ -1469,6 +1476,16 @@ export class Ghost implements PlayerHost {
    * シェルを切り替える。スクリプトから (\![change,shell]) のときは、--option=raise-event が無ければ
    * OnShellChanging を送らず、OnShellChanged はそのスクリプトが終わってから送る。
    */
+  /**
+   * \![reload,shell]: いまのシェルを、キャラクターのサーフェス・位置・Z 順をそのままに読み直す。
+   * SHIORI がシェルのフォルダへ書いたもの (『CLDSP2+』のサーフェスの定義など) を先に書き戻してから読む
+   */
+  async reloadShell(): Promise<void> {
+    await this.shiori?.flush?.();
+    if (this.destroyed) return;
+    await this.changeShell(this.shell.dir, { force: true });
+  }
+
   async changeShell(dir: string, opts: { fromScript?: boolean; raiseEvent?: boolean; force?: boolean } = {}): Promise<void> {
     if (!this.shellDirs.includes(dir) || (dir === this.shell.dir && !opts.force)) return;
     const next = Shell.fromGhost(this.files, dir);
@@ -1827,9 +1844,10 @@ export class Ghost implements PlayerHost {
   async dropFiles(scope: number, files: { name: string; type: string; data: Uint8Array }[]): Promise<boolean> {
     const paths: string[] = [];
     for (const f of files) {
-      const path = `ghost/master/drop/${f.name.replace(/[\\/:*?"<>|]/g, '_')}`;
-      this.saveFile(path, f.data);
-      paths.push(path.slice('ghost/master/'.length));
+      const name = f.name.replace(/[\\/:*?"<>|]/g, '_');
+      this.saveFile(`ghost/master/drop/${name}`, f.data);
+      // SSP と同じく区切りは \ (最後の \ の後ろをファイル名として取り出すゴーストがある)。Engawa もどの SHIORI も \ を区切りとして読む
+      paths.push(`drop\\${name}`);
     }
     const refs = [paths.join('\x01'), scope, files.map((f) => f.type).join('\x01')];
     await this.notify('OnFileDropping', [paths.join('\x01'), scope]);
@@ -3458,6 +3476,9 @@ export class Ghost implements PlayerHost {
       if (data) this.startSound(effect.path, URL.createObjectURL(new Blob([data as BlobPart])), { revoke: true });
     } else if (effect.kind === 'write') {
       this.saveFile(effect.path, effect.data);
+    } else if (effect.kind === 'event') {
+      // SAORI over DirectSSTP の --async の結果
+      void this.raise(effect.id, effect.refs);
     } else if (effect.kind === 'speak' && typeof speechSynthesis !== 'undefined') {
       if (effect.stop) speechSynthesis.cancel();
       else if (effect.text) {
@@ -3495,8 +3516,10 @@ export class Ghost implements PlayerHost {
       }
       case 'pause':
         targets().forEach((s) => s.audio.pause());
+        if (file && args.length > 1) this.soundOption(file, args.slice(1));
         return;
       case 'resume':
+        if (file && args.length > 1) this.soundOption(file, args.slice(1));
         targets().forEach((s) => void s.audio.play().catch(() => undefined));
         return;
       case 'stop':
@@ -3514,8 +3537,11 @@ export class Ghost implements PlayerHost {
     if (!s) return false;
     const vol = optionValue(options, 'volume');
     if (vol !== undefined && Number.isFinite(Number(vol))) s.audio.volume = Math.min(1, Math.max(0, Number(vol) / 100));
-    const seek = optionValue(options, 'seektime') ?? optionValue(options, 'position');
-    if (seek !== undefined && Number.isFinite(Number(seek))) s.audio.currentTime = Number(seek) / 1000;
+    const seek = seekTime(optionValue(options, 'seektime') ?? optionValue(options, 'position'));
+    if (seek !== undefined) s.audio.currentTime = seek / 1000;
+    // --rate=1〜10000 (100 が通常の速さ)。ブラウザの再生できる速さは 0.0625〜16 倍
+    const rate = Number(optionValue(options, 'rate'));
+    if (Number.isFinite(rate) && rate > 0) s.audio.playbackRate = Math.min(16, Math.max(0.0625, rate / 100));
     const loop = optionValue(options, 'loop');
     if (loop !== undefined) s.audio.loop = boolArg(loop);
     const balance = optionValue(options, 'balance');
@@ -3539,7 +3565,7 @@ export class Ghost implements PlayerHost {
     const zero = () => {
       const sp = s.spectrum;
       if (!sp) return;
-      void this.notify('OnSoundSpectrum', [s.name, sp.bands, '0\x010', '0\x010', new Array(sp.bands).fill(0).join('\x01'), new Array(sp.bands).fill(0).join('\x01'), Math.round(s.audio.currentTime * 1000)]);
+      void this.raise('OnSoundSpectrum', [s.name, sp.bands, '0\x010', '0\x010', new Array(sp.bands).fill(0).join('\x01'), new Array(sp.bands).fill(0).join('\x01'), Math.round(s.audio.currentTime * 1000)], { ifIdle: true });
     };
     if (s.spectrum) {
       clearInterval(s.spectrum.timer);
@@ -3569,7 +3595,8 @@ export class Ghost implements PlayerHost {
         sp.peaks = f.channels.map((v, i) => Math.max(v, sp.peaks[i] ?? 0));
         sp.bandPeaks = f.bands.map((v, i) => Math.max(v, sp.bandPeaks[i] ?? 0));
       }
-      void this.notify('OnSoundSpectrum', [s.name, bands, f.channels.join('\x01'), sp.peaks.join('\x01'), f.bands.join('\x01'), sp.bandPeaks.join('\x01'), Math.round(s.audio.currentTime * 1000)]);
+      // 返したスクリプトは再生する (再生中の表示の更新に使うゴーストがある)。喋っている間は割り込まない
+      void this.raise('OnSoundSpectrum', [s.name, bands, f.channels.join('\x01'), sp.peaks.join('\x01'), f.bands.join('\x01'), sp.bandPeaks.join('\x01'), Math.round(s.audio.currentTime * 1000)], { ifIdle: true });
     }, Math.max(16, interval));
     s.spectrum = sp;
   }
@@ -3587,7 +3614,7 @@ export class Ghost implements PlayerHost {
     // ループで頭に戻った (OnSoundLoop)
     let last = 0;
     audio.addEventListener('timeupdate', () => {
-      if (audio.loop && audio.currentTime + 0.5 < last) void this.notify('OnSoundLoop', [name]);
+      if (audio.loop && audio.currentTime + 0.5 < last) void this.raise('OnSoundLoop', [name]);
       last = audio.currentTime;
     });
     audio.addEventListener('error', () => {
@@ -3615,7 +3642,8 @@ export class Ghost implements PlayerHost {
     s.audio.pause();
     if (s.spectrum) this.soundSpectrum(s, 0);
     this.forgetSound(s);
-    if (reason) void this.notify('OnSoundStop', [s.name, reason]);
+    // 返したスクリプトは再生する (曲の終わりで次の曲を鳴らすプレイヤーのゴーストなど)
+    if (reason) void this.raise('OnSoundStop', [s.name, reason]);
   }
 
   /** 再生中の (ループでない) 音が終わるまで。止められた・再生できなかった音は待たない */

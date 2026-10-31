@@ -25,6 +25,8 @@ export interface SaoriResult {
   status?: 200 | 204 | 400 | 500;
   result?: string;
   values?: string[];
+  /** 失敗の理由 (SAORI over DirectSSTP の ErrorDescription。固定の英語の文字列) */
+  error?: string;
 }
 
 const STATUS_TEXT: Record<number, string> = { 200: 'OK', 204: 'No Content', 400: 'Bad Request', 500: 'Internal Server Error' };
@@ -63,6 +65,7 @@ export function buildSaoriResponse(res: SaoriResult, charset: string): Uint8Arra
   // 値に改行があると応答が壊れるので、SSP と同じく取り除く
   const clean = (v: string) => v.replace(/\r?\n/g, ' ');
   if (res.result !== undefined) lines.push(`Result: ${clean(res.result)}`);
+  if (res.error) lines.push(`ErrorDescription: ${clean(res.error)}`);
   res.values?.forEach((v, i) => lines.push(`Value${i}: ${clean(v)}`));
   return encodeCharset(`${lines.join('\r\n')}\r\n\r\n`, charset);
 }

@@ -6,13 +6,14 @@
 import { gunzipSync } from 'fflate';
 import type { SaoriEffect, SaoriEnv } from '../saori/context';
 import { SaoriHost } from '../saori/host';
+import { internalSaori } from '../saori/internal';
 import { saoriResolver } from '../saori/registry';
 import { prepareWasmSaori, type WasmSaoriPlan } from '../saori/wasm';
-import { callLoad, callRequest, ignoreCase, walk, writeFiles } from './native-call';
+import { callLoad, callRequest, ignoreCase, mkdirs, walk, writeFiles } from './native-call';
 import { ENGINES, type EmscriptenModule, type EngineId } from './native-engines';
 
 type ToNative =
-  | { id: number; type: 'load'; engine: EngineId; wasm: Uint8Array; files: [string, Uint8Array][]; env: SaoriEnv; saori: WasmSaoriPlan[] }
+  | { id: number; type: 'load'; engine: EngineId; wasm: Uint8Array; files: [string, Uint8Array][]; env: SaoriEnv; saori: WasmSaoriPlan[]; shellDirs?: string[] }
   | { id: number; type: 'request'; data: Uint8Array }
   | { id: number; type: 'env'; env: SaoriEnv }
   | { id: number; type: 'flush' }
@@ -48,10 +49,14 @@ function same(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/** SHIORI が書いたファイル (セーブデータなど) をメインスレッドへ送る */
+/** ゴーストのシェルのフォルダ (パッケージの shell/)。SHIORI が ..\..\shell\master\… へ書けるようにする */
+const SHELL_ROOT = '/shell';
+
+/** SHIORI が書いたファイル (セーブデータ、シェルのフォルダへ書いたサーフェスの定義など) をメインスレッドへ送る */
 function flush(): void {
   if (!mod) return;
-  for (const [path, abs] of walk(mod.FS, ROOT)) {
+  const shell = mod.FS.analyzePath(SHELL_ROOT).exists ? [...walk(mod.FS, SHELL_ROOT)].map(([rel, abs]) => [`../../shell/${rel}`, abs] as [string, string]) : [];
+  for (const [path, abs] of [...walk(mod.FS, ROOT), ...shell]) {
     const data = mod.FS.readFile(abs);
     const before = original.get(path);
     if (before && same(before, data)) continue;
@@ -70,7 +75,10 @@ async function load(msg: Extract<ToNative, { type: 'load' }>): Promise<void> {
     printErr: (s: string) => log(s),
   });
   ignoreCase(m.FS, ROOT);
+  ignoreCase(m.FS, SHELL_ROOT);
   writeFiles(m.FS, ROOT, msg.files);
+  // シェルのフォルダは空で作る (中身は読まないが、ゴーストがサーフェスの定義などを書き出すことがある)
+  for (const d of msg.shellDirs ?? []) mkdirs(m.FS, `${SHELL_ROOT}/${d}`);
   for (const [path, data] of msg.files) original.set(path, data);
   m.FS.chdir(ROOT);
   mod = m;
@@ -78,7 +86,8 @@ async function load(msg: Extract<ToNative, { type: 'load' }>): Promise<void> {
   // SHIORI が SAORI の DLL を開くと、native/shim/engawa_saori.c がここを呼ぶ
   const prepared = await prepareWasmSaori(msg.saori, msg.files, { fs: m.FS, root: ROOT, post, log });
   saori = new SaoriHost(m.FS, ROOT, saoriResolver({ fs: m.FS, env: () => env, post, log, prepared }), log);
-  m.engawaSaori = saori.bridge;
+  // Direct SSTP (SAORI over DirectSSTP) は、Engawa の内蔵モジュール (src/saori/internal.ts) が答える
+  m.engawaSaori = { ...saori.bridge, directSstp: (req) => internalSaori(req, { fs: m.FS, root: ROOT, post }) ?? null };
   // DLL と同じく、ディレクトリは末尾に区切りを付けて渡す
   const dir = new TextEncoder().encode(`${ROOT}/`);
   if (!callLoad(m, dir)) log('SHIORI load() returned FALSE');

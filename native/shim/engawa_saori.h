@@ -17,6 +17,11 @@ void *engawa_dlopen(const char *path, int flags);
 void *engawa_dlsym(void *handle, const char *name);
 int engawa_dlclose(void *handle);
 char *engawa_dlerror(void);
+/*
+ * Direct SSTP の要求 (SAORI over DirectSSTP の SAORI/1.0 など) を Engawa に送り、応答を malloc したバイト列で返す
+ * (解放は呼んだ側。長さは *out_len)。答えられなければ NULL。華和梨 9 の misc/dsstp.cpp が使う (native/engines.mjs の edits)
+ */
+char *engawa_direct_sstp(const char *req, int len, long *out_len);
 
 #ifdef __cplusplus
 }

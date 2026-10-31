@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { httpEvent, httpFileName, parseHttp } from '../src/ghost/http';
 import { anchorPoint, moveTarget, parseMove } from '../src/ghost/move';
 import { readProperty, writeProperty, type PropertyHost } from '../src/ghost/properties';
+import { seekTime } from '../src/ghost/sound-options';
 import { randomWord } from '../src/ghost/words';
 import { parseUpdateList, updateBase } from '../src/package/update';
 import { parseBlend } from '../src/shell/blend';
@@ -140,6 +141,8 @@ describe('プロパティシステム', () => {
     expect(readProperty('currentghost.craftmanw', h)).toBe('作者');
     expect(readProperty('currentghost.status', h)).toBe('talking,balloon(0=0)');
     expect(readProperty('currentghost.scope(0).surface.num', h)).toBe('5');
+    // 華和梨は ( ) の中の括弧を消すので、scope0 のような書き方でも読めるように
+    expect(readProperty('currentghost.scope0.surface.num', h)).toBe('5');
     expect(readProperty('currentghost.scope(0).animation.num', h)).toBe('1,2');
     expect(readProperty('currentghost.scope(0).rect', h)).toBe('10,20,110,220');
     expect(readProperty('currentghost.scope(0).x', h)).toBe('60');
@@ -164,5 +167,15 @@ describe('プロパティシステム', () => {
     expect(writeProperty('currentghost.shelllist(マスター).menu', 'hidden', h)).toBe(true);
     expect(readProperty('currentghost.shelllist.index(0).menu', h)).toBe('hidden');
     expect(writeProperty('baseware.name', 'x', h)).toBe(false);
+  });
+});
+
+describe('\\![sound] の --seektime', () => {
+  it('「:」が無ければミリ秒、あれば [[時:]分:]秒[.ミリ秒]', () => {
+    expect(seekTime('9050')).toBe(9050);
+    expect(seekTime('1:30.5')).toBe(90500);
+    expect(seekTime('1:00:00')).toBe(3600000);
+    expect(seekTime('x')).toBeUndefined();
+    expect(seekTime(undefined)).toBeUndefined();
   });
 });

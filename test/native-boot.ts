@@ -8,6 +8,7 @@ import createYaya from '../src/assets/shiori/yaya.mjs';
 import YAYA_WASM from '../src/assets/shiori/yaya.wasm.gz?inline';
 import type { EmscriptenModule, EngineFactory } from '../src/shiori/native-engines';
 import { ignoreCase } from '../src/shiori/native-call';
+import { internalSaori } from '../src/saori/internal';
 import { normalizePath } from '../src/vfs/files';
 import { encodeCharset } from '../src/util/charset-encode';
 
@@ -57,7 +58,7 @@ export async function boot(create: EngineFactory, wasmDataUrl: string, files: Re
   const plans = Object.entries(saori).map(([path, [kind, url]]) => ({ path: normalizePath(path), kind, wasm: dataUrlBytes(url) }));
   const prepared = await prepareWasmSaori(plans, Object.entries(files).map(([p, d]) => [normalizePath(p), d] as [string, Uint8Array]), { fs: m.FS, root: '/ghost/master', post, log });
   const host = new SaoriHost(m.FS, '/ghost/master', saoriResolver({ fs: m.FS, env: () => TEST_ENV, post, log, prepared }), log);
-  m.engawaSaori = host.bridge;
+  m.engawaSaori = { ...host.bridge, directSstp: (req) => internalSaori(req, { fs: m.FS, root: '/ghost/master', post }) ?? null };
   const put = (bytes: Uint8Array) => {
     const p = m._malloc(bytes.length + 1);
     m.HEAPU8.set(bytes, p);
