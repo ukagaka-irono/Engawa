@@ -1,7 +1,8 @@
 import { clone } from '../util/clone';
 import { FileTree, basename, normalizePath } from './files';
 
-export type PackageKind = 'ghost' | 'balloon';
+/** ゴースト・バルーンのほか、Engawa では動かせないが SSP と同じく保存しておくもの (プラグイン・ヘッドラインなど) */
+export type PackageKind = 'ghost' | 'balloon' | 'plugin' | 'headline' | 'calendar skin' | 'calendar plugin' | 'language';
 
 export interface PackageMeta {
   /** `ghost/<dir>` や `balloon/<dir>` */
@@ -261,6 +262,30 @@ export async function writePackageFile(key: string, path: string, data: Uint8Arr
   }
   return run(['files'], 'readwrite', async (tx) => {
     tx.objectStore('files').put(data, [key, normalizePath(path)]);
+  });
+}
+
+/** パッケージの中のファイルを消す (delete.txt)。末尾が / のものはそのディレクトリの中をすべて */
+export async function deletePackageFiles(key: string, paths: string[]): Promise<void> {
+  const exact = new Set<string>();
+  const dirs: string[] = [];
+  for (const raw of paths) {
+    const p = normalizePath(raw.replace(/\\/g, '/'));
+    if (!p) continue;
+    if (/[\\/]$/.test(raw)) dirs.push(`${p}/`);
+    else exact.add(p);
+  }
+  if (!exact.size && !dirs.length) return;
+  if (await inMemory()) {
+    const stored = memory.files.get(key);
+    if (!stored) return;
+    for (const path of [...stored.keys()]) if (exact.has(path) || dirs.some((d) => path.startsWith(d))) stored.delete(path);
+    return;
+  }
+  return run(['files'], 'readwrite', async (tx) => {
+    const store = tx.objectStore('files');
+    for (const p of exact) store.delete([key, p]);
+    for (const d of dirs) store.delete(prefixRange(key, d));
   });
 }
 

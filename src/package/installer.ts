@@ -1,8 +1,24 @@
 import { Descript } from './descript';
 import { FileTree, normalizePath } from '../vfs/files';
-import { getPackage, putPackage, type PackageMeta, type Refresh } from '../vfs/storage';
+import { decodeText } from '../util/text';
+import { deletePackageFiles, getPackage, putPackage, readPackageFile, type PackageKind, type PackageMeta, type Refresh } from '../vfs/storage';
 
-export type InstallType = 'ghost' | 'balloon' | 'shell' | 'supplement';
+/**
+ * インストールの種類。plugin・headline・calendar skin・calendar plugin・language は、Engawa では動かせないが
+ * SSP と同じく保存しておく (ゴーストからは一覧やプロパティで見える)。package は複数をまとめたもの
+ */
+export type InstallType = 'ghost' | 'balloon' | 'shell' | 'supplement' | 'plugin' | 'headline' | 'calendar skin' | 'calendar plugin' | 'language' | 'package';
+
+/** 保存するだけの種類 (パッケージのキーは `種類/ディレクトリ`) */
+const STORED_TYPES: InstallType[] = ['plugin', 'headline', 'calendar skin', 'calendar plugin', 'language'];
+
+/** インストールしたもの1つ (OnInstallCompleteEx の識別子・名前・場所) */
+export interface Installed {
+  type: InstallType;
+  name: string;
+  /** パッケージのキー */
+  key: string;
+}
 
 /** OnInstallFailure の Reference0 に使う理由 (ukadoc) */
 export type InstallFailure = 'extraction' | 'invalid type' | 'unsupported';
@@ -20,6 +36,8 @@ export interface InstallResult {
   /** accept で別のゴースト宛てだったので、そちらへ入れた */
   rerouted: boolean;
   accept?: string;
+  /** 一緒に入れたものすべて (同梱のバルーン・プラグインなど、package の中身を含む) */
+  installed: Installed[];
 }
 
 export interface InstallTarget {
@@ -55,15 +73,11 @@ export function acceptNamesOf(descript: Descript): string[] {
     .filter(Boolean);
 }
 
-/** SSP が知っているが Engawa ではインストールしない種類 */
-const UNSUPPORTED_TYPES = ['plugin', 'headline', 'package', 'language', 'calendar skin', 'calendar plugin'];
-
 function detectType(files: FileTree, install: Descript): InstallType | undefined {
-  const t = install.str('type').trim().toLowerCase();
+  const t = install.str('type').trim().toLowerCase().replace(/\./g, ' ');
   if (t) {
     if (t.startsWith('ghost')) return 'ghost';
-    if (t === 'balloon' || t === 'shell' || t === 'supplement') return t;
-    if (UNSUPPORTED_TYPES.includes(t)) throw new InstallError(`「${t}」はインストールできない種類です`, 'unsupported');
+    if (t === 'balloon' || t === 'shell' || t === 'supplement' || t === 'package' || (STORED_TYPES as string[]).includes(t)) return t as InstallType;
     throw new InstallError(`install.txt の type「${t}」が分かりません`, 'invalid type');
   }
   if (files.has('ghost/master/descript.txt')) return 'ghost';
@@ -108,32 +122,63 @@ function refreshOf(install: Descript, prefix: string, keyPrefix = ''): Refresh |
   return { prefix, keep };
 }
 
+/** delete.txt (消すファイルの一覧。ゴーストのホームからの \\ 区切りの相対パス、末尾が \\ ならディレクトリ) */
+export function parseDeleteList(data: Uint8Array): string[] {
+  return decodeText(data)
+    .split(/\r\n|\r|\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^charset,/i.test(l) && !l.startsWith('//') && !/(^|[\\/])\.\.([\\/]|$)/.test(l));
+}
+
+/** パッケージに入れた後で delete.txt のファイルを消す (新しいアーカイブにあればそれ、無ければ保存してあるもの) */
+async function applyDeleteList(key: string, files: FileTree, prefix = ''): Promise<void> {
+  const data = files.get('delete.txt') ?? (await readPackageFile(key, `${prefix}delete.txt`));
+  if (!data) return;
+  // 新しく入れたファイルは消さない
+  const list = parseDeleteList(data).filter((p) => !files.has(normalizePath(p.replace(/\\/g, '/'))));
+  await deletePackageFiles(key, list.map((p) => `${prefix}${p}`));
+}
+
+/** 同梱できる種類 (install.txt の「種類.directory」の種類と、保存するパッケージの種類) */
+const BUNDLE_KINDS: [string, PackageKind][] = [
+  ['balloon', 'balloon'],
+  ['headline', 'headline'],
+  ['plugin', 'plugin'],
+  ['calendar.skin', 'calendar skin'],
+  ['calendar.plugin', 'calendar plugin'],
+];
+
 /**
- * 同梱バルーン (balloon.directory → balloon0.directory → balloon1… の順。番号が欠けたら終わり) を
+ * 同梱のもの (balloon.directory → balloon0.directory → balloon1… の順。番号が欠けたら終わり。headline・plugin なども同じ) を
  * それぞれ別のパッケージとして入れ、元のファイル群からは取り除く。
  */
-async function installBundledBalloons(files: FileTree, install: Descript, rest: FileTree, now: number): Promise<{ key: string; name: string }[]> {
-  const out: { key: string; name: string }[] = [];
-  const bases = ['balloon'];
-  for (let n = 0; install.get(`balloon${n}.directory`) !== undefined; n++) bases.push(`balloon${n}`);
-  for (const base of bases) {
-    const dir = install.get(`${base}.directory`);
-    if (!dir) continue;
-    // 空の source.directory はディレクトリ名と同じ扱い (アーカイブ全体をバルーンにしない)
-    const source = install.get(`${base}.source.directory`) || dir;
-    if (!normalizePath(source)) continue;
-    const balloonFiles = files.sub(source);
-    if (balloonFiles.size === 0) continue;
-    const bdir = safeDir(dir);
-    const key = `balloon/${bdir}`;
-    const prev = await getPackage(key);
-    const name = Descript.read(balloonFiles, 'descript.txt').str('name', prev?.name ?? bdir);
-    await putPackage({ key, kind: 'balloon', dir: bdir, name, installedAt: now }, balloonFiles, '', refreshOf(install, '', `${base}.`));
-    for (const p of rest.list(source)) rest.delete(p);
-    out.push({ key, name });
+async function installBundled(files: FileTree, install: Descript, rest: FileTree, now: number): Promise<Installed[]> {
+  const out: Installed[] = [];
+  for (const [entry, kind] of BUNDLE_KINDS) {
+    const bases = [entry];
+    for (let n = 0; install.get(`${entry}${n}.directory`) !== undefined; n++) bases.push(`${entry}${n}`);
+    for (const base of bases) {
+      const dir = install.get(`${base}.directory`);
+      if (!dir) continue;
+      // 空の source.directory はディレクトリ名と同じ扱い (アーカイブ全体を同梱物にしない)
+      const source = install.get(`${base}.source.directory`) || dir;
+      if (!normalizePath(source)) continue;
+      const sub = files.sub(source);
+      if (sub.size === 0) continue;
+      const bdir = safeDir(dir);
+      const key = `${kind}/${bdir}`;
+      const prev = await getPackage(key);
+      const name = Descript.read(sub, 'descript.txt').str('name', prev?.name ?? bdir);
+      await putPackage({ key, kind, dir: bdir, name, installedAt: now }, sub, '', refreshOf(install, '', `${base}.`));
+      for (const p of rest.list(source)) rest.delete(p);
+      out.push({ type: kind as InstallType, key, name });
+    }
   }
   return out;
 }
+
+/** 同梱のもののうちバルーン */
+const balloonsOf = (items: Installed[]) => items.filter((i) => i.type === 'balloon').map(({ key, name }) => ({ key, name }));
 
 /** accept (本体側の名前) でインストール先を決める。無ければ選択中のゴースト */
 function pickTarget(targets: InstallTarget[], accept: string, preferred: string | undefined, item: { type: InstallType; name: string }): InstallTarget {
@@ -178,12 +223,28 @@ export async function installFiles(
   const rest = withoutInstallTxt(files);
   const accept = install.str('accept');
 
-  if (type === 'balloon') {
-    const key = `balloon/${dir}`;
+  if (type === 'package') {
+    // 複数をまとめたもの。中のディレクトリをそれぞれ入れ、最初のゴースト (無ければ最初のもの) を結果にする
+    const results: InstallResult[] = [];
+    for (const sub of files.dirs()) {
+      const part = files.sub(sub);
+      if (!part.has('install.txt') && !detectType(part, new Descript())) continue;
+      results.push(await installFiles(part, sub, targets, preferred));
+    }
+    if (!results.length) throw new InstallError('パッケージの中にインストールできるものがありません', 'invalid type');
+    const main = results.find((r) => r.type === 'ghost') ?? results[0];
+    const name = install.str('name', main.name);
+    return { ...main, type: 'package', name, installName: name, installed: results.flatMap((r) => r.installed) };
+  }
+
+  if (type === 'balloon' || (STORED_TYPES as string[]).includes(type)) {
+    const kind = type as PackageKind;
+    const key = `${kind}/${dir}`;
     const prev = await getPackage(key);
-    const name = Descript.read(files, 'descript.txt').str('name', prev?.name ?? dir);
-    await putPackage({ key, kind: 'balloon', dir, name, installedAt: now }, rest, '', refreshOf(install, ''));
-    return { type, name, installName: install.str('name', name), key, balloons: [], rerouted: false };
+    const name = Descript.read(files, 'descript.txt').str('name', install.str('name', prev?.name ?? dir));
+    await putPackage({ key, kind, dir, name, installedAt: now }, rest, '', refreshOf(install, ''));
+    await applyDeleteList(key, rest);
+    return { type, name, installName: install.str('name', name), key, balloons: [], rerouted: false, installed: [{ type, name, key }] };
   }
 
   if (type === 'shell' || type === 'supplement') {
@@ -191,24 +252,27 @@ export async function installFiles(
     const target = pickTarget(await targets(), accept, preferred, { type, name: install.str('name', name) });
     const existing = await getPackage(target.key);
     if (!existing) throw new InstallError(MISSING_TARGET, 'unsupported');
-    const balloons = await installBundledBalloons(files, install, rest, now);
+    const bundled = await installBundled(files, install, rest, now);
     const prefix = type === 'shell' ? `shell/${dir}/` : '';
     await putPackage(existing, rest, prefix, refreshOf(install, type === 'shell' ? `shell/${dir}` : ''));
+    await applyDeleteList(target.key, rest, prefix);
     return {
       type,
       name,
       installName: install.str('name', name),
       key: target.key,
-      balloons,
+      balloons: balloonsOf(bundled),
       rerouted: !!preferred && target.key !== preferred,
       accept: accept || undefined,
+      installed: [{ type, name, key: target.key }, ...bundled],
     };
   }
 
   // ghost
   const key = `ghost/${dir}`;
   const prev = await getPackage(key);
-  const balloons = await installBundledBalloons(files, install, rest, now);
+  const bundled = await installBundled(files, install, rest, now);
+  const balloons = balloonsOf(bundled);
   const descript = files.has('ghost/master/descript.txt') ? Descript.read(files, 'ghost/master/descript.txt') : undefined;
   // 差分 nar (descript.txt を含まない) でも、前の名前や同梱バルーンを引き継ぐ
   const name = descript?.str('name') || prev?.name || dir;
@@ -224,5 +288,6 @@ export async function installFiles(
     defaultBalloon: balloons[0]?.key ?? prev?.defaultBalloon,
   };
   await putPackage(meta, rest, '', refreshOf(install, ''));
-  return { type, name, installName: install.str('name', name), key, balloons, rerouted: false };
+  await applyDeleteList(key, rest);
+  return { type, name, installName: install.str('name', name), key, balloons, rerouted: false, installed: [{ type, name, key }, ...bundled] };
 }

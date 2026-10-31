@@ -206,6 +206,90 @@ export const ENGINES = [
     ldflags: ['-sSTACK_SIZE=16MB'],
   },
   {
+    name: 'pasta',
+    label: 'pasta',
+    licenses: [{ title: 'pasta (MIT)', file: 'LICENSE' }],
+    repo: 'https://github.com/ekicyou/pasta.git',
+    commit: '96adf83f36e978bf0dbd9c754b45607f918fedce',
+    // Rust 製 (Pasta DSL を Lua にして動かす)。ワークスペースのうち SHIORI の pasta_shiori だけを静的ライブラリにする。
+    //   - LuaJIT は WebAssembly にできないので、mlua を標準の Lua 5.4 で組む (pasta の Lua は標準の Lua でも動くように書かれている)
+    //   - DLL の入口 (windows.rs) とアクターのスレッドは Windows 向けなので、スレッドを使わずに PastaShiori をそのまま呼ぶ入口を足す
+    // pasta の台本は日本語の名前の変数・関数を使う (LuaJIT は許す) ので、Lua 5.4 も LUA_UCID で許すように組む
+    rust: { lib: 'pasta', package: 'pasta_shiori', cflags: ['-DLUA_UCID'] },
+    edits: {
+      'Cargo.toml': [['mlua = { version = "0.12.2", features = ["luajit52", "vendored", "serialize"] }', 'mlua = { version = "0.12.2", features = ["lua54", "vendored", "serialize"] }']],
+      // LuaJIT にしか無いライブラリ (jit・ffi・bit) は無いものとして扱う。Lua 5.4 の coroutine は別のライブラリ
+      'crates/pasta_lua/src/runtime/runtime_config.rs': [
+        ['"std_coroutine" => Ok(StdLib::NONE),', '"std_coroutine" => Ok(StdLib::COROUTINE),'],
+        ['"std_jit" => Ok(StdLib::JIT),', '"std_jit" => Ok(StdLib::NONE),'],
+        ['"std_ffi" => Ok(StdLib::FFI),', '"std_ffi" => Ok(StdLib::NONE),'],
+        ['"std_bit" => Ok(StdLib::BIT),', '"std_bit" => Ok(StdLib::NONE),'],
+      ],
+      // Lua 5.4 には package.loaders (5.1 の名前) が無いので package.searchers を使う (並びは同じ4つ)
+      'crates/pasta_lua/src/runtime/searcher.rs': [['    let loaders: Table = package.get("loaders")?;', '    let loaders: Table = package.get("searchers")?;']],
+      'crates/pasta_shiori/src/lib.rs': [
+        [
+          '#[cfg(windows)]\npub use windows::{load, loadu, request, unload};',
+          '#[cfg(windows)]\npub use windows::{load, loadu, request, unload};\n\n' +
+            '/// Engawa (Emscripten) の入口。渡されるバイト列は malloc したもの (GlobalAlloc の代わり) で、こちらで free する。\n' +
+            '/// Worker の中で1つだけ動くので、スレッドを使わずに PastaShiori をそのまま呼ぶ\n' +
+            '#[cfg(target_os = "emscripten")]\n' +
+            'mod engawa {\n' +
+            '    use crate::shiori::{PastaShiori, Shiori};\n' +
+            '    use std::cell::RefCell;\n' +
+            '    use std::ffi::c_long;\n' +
+            '    unsafe extern "C" {\n' +
+            '        fn malloc(size: usize) -> *mut u8;\n' +
+            '        fn free(ptr: *mut u8);\n' +
+            '    }\n' +
+            '    thread_local! {\n' +
+            '        static SHIORI: RefCell<Option<PastaShiori>> = const { RefCell::new(None) };\n' +
+            '    }\n' +
+            '    unsafe fn take(ptr: *mut u8, len: usize) -> String {\n' +
+            '        let s = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(ptr, len) }).into_owned();\n' +
+            '        unsafe { free(ptr) };\n' +
+            '        s\n' +
+            '    }\n' +
+            '    #[unsafe(no_mangle)]\n' +
+            '    pub unsafe extern "C" fn load(h: *mut u8, len: c_long) -> i32 {\n' +
+            '        let dir = unsafe { take(h, len.max(0) as usize) };\n' +
+            '        let mut shiori = PastaShiori::default();\n' +
+            '        let ok = shiori.load(0, dir.trim_end_matches(\'/\')).unwrap_or(false);\n' +
+            '        SHIORI.with(|s| *s.borrow_mut() = Some(shiori));\n' +
+            '        ok as i32\n' +
+            '    }\n' +
+            '    #[unsafe(no_mangle)]\n' +
+            '    pub unsafe extern "C" fn request(h: *mut u8, len: *mut c_long) -> *mut u8 {\n' +
+            '        let req = unsafe { take(h, (*len).max(0) as usize) };\n' +
+            '        let res = SHIORI.with(|s| match s.borrow_mut().as_mut() {\n' +
+            '            Some(shiori) => shiori.request(&req).unwrap_or_else(|e| e.to_shiori_response()),\n' +
+            '            None => crate::error::MyError::NotInitialized.to_shiori_response(),\n' +
+            '        });\n' +
+            '        let bytes = res.into_bytes();\n' +
+            '        let out = unsafe { malloc(bytes.len() + 1) };\n' +
+            '        if out.is_null() {\n' +
+            '            unsafe { *len = 0 };\n' +
+            '            return out;\n' +
+            '        }\n' +
+            '        unsafe {\n' +
+            '            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());\n' +
+            '            *out.add(bytes.len()) = 0;\n' +
+            '            *len = bytes.len() as c_long;\n' +
+            '        }\n' +
+            '        out\n' +
+            '    }\n' +
+            '    #[unsafe(no_mangle)]\n' +
+            '    pub extern "C" fn unload() -> i32 {\n' +
+            '        SHIORI.with(|s| drop(s.borrow_mut().take()));\n' +
+            '        1\n' +
+            '    }\n' +
+            '}',
+        ],
+      ],
+    },
+    ldflags: ['-sSTACK_SIZE=16MB'],
+  },
+  {
     name: 'kagari',
     label: 'kagari',
     licenses: [

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import BUDOUX_WASM from '../src/assets/saori/budoux.wasm.gz?inline';
 import CALCS_WASM from '../src/assets/saori/calcs.wasm.gz?inline';
 import GENGOU_WASM from '../src/assets/saori/gengou.wasm.gz?inline';
+import KISARAGI_WASM from '../src/assets/saori/kisaragi.wasm.gz?inline';
 import MAHJONGUTIL_WASM from '../src/assets/saori/mahjongutil.wasm.gz?inline';
 import NODOKA_WASM from '../src/assets/saori/nodoka.wasm.gz?inline';
 import PIECHART_WASM from '../src/assets/saori/piechart.wasm.gz?inline';
@@ -10,6 +11,7 @@ import QRCODE_WASM from '../src/assets/saori/qrcode.wasm.gz?inline';
 import RESIZEDPNG_WASM from '../src/assets/saori/resizedpng.wasm.gz?inline';
 import RESIZEDPNGMINI_WASM from '../src/assets/saori/resizedpngmini.wasm.gz?inline';
 import SQLORI_WASM from '../src/assets/saori/sqlori.wasm.gz?inline';
+import SQLORI2_WASM from '../src/assets/saori/sqlori2.wasm.gz?inline';
 import SSU_WASM from '../src/assets/saori/ssu.wasm.gz?inline';
 import TEXASHOLDEM_WASM from '../src/assets/saori/texasholdem.wasm.gz?inline';
 import TIMEBKN_WASM from '../src/assets/saori/timebkn.wasm.gz?inline';
@@ -51,6 +53,27 @@ describe('sqlori (CSaori の SQLite、WebAssembly)', () => {
     expect(written).toContain('ghost/master/saori/sqlori.db');
     // SHIORI のファイルシステムにも写してある (セーブデータと同じく flush で残る)
     expect(new TextDecoder('latin1').decode(s.y.read('saori/sqlori.db').subarray(0, 15))).toBe('SQLite format 3');
+  });
+});
+
+describe('sqlori-sqlite2 (CSaori の SQLite 2、WebAssembly)', () => {
+  it('SQLite 2 のデータベースを読み書きする', async () => {
+    const s = await saori('sqlori2', SQLORI2_WASM, 'saori/sqlori-sqlite2.dll');
+    expect(s.execute('OPEN').result).toBe('0');
+    s.execute('EXEC', 'CREATE TABLE talk (id, text)');
+    s.execute('EXEC', "INSERT INTO talk VALUES (1, 'こんにちは')");
+    expect(s.execute('EXEC', 'SELECT * FROM talk').result).toBe('0idtext1こんにちは');
+    s.execute('CLOSE');
+    expect(new TextDecoder('latin1').decode(s.y.read('saori/sqlori.db').subarray(0, 47))).toBe('** This file contains an SQLite 2.1 database **');
+  });
+});
+
+describe('kisaragi (CSaori の MeCab、WebAssembly)', () => {
+  it('辞書 (dic/) が無ければ、その理由を Value0 に返す', async () => {
+    const s = await saori('kisaragi', KISARAGI_WASM, 'saori/kisaragi.dll');
+    const r = s.execute('parse', '如月と申します。');
+    expect(r.result).toBe('-1');
+    expect(r.values[0]).toMatch(/dicrc|no such file/);
   });
 });
 

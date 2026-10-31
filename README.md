@@ -63,19 +63,19 @@ Internet Explorer には対応していません。
 
 | 分野 | 対応しているもの |
 |---|---|
-| パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory` と番号付きの `balloonN.directory` 同梱)、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む)、URL からのインストール (`\![execute,install,url]`・URL のドロップ)、インストール後の readme、ネットワーク更新 (`updates2.dau` / `updates.txt`。配布先が CORS を許しているときだけ)、消滅 (`\![vanishbymyself]`・メニューの消滅指示) |
+| パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement / package、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory`・`plugin.directory` など番号付きを含む同梱)、plugin・headline・calendar・language は保存だけ (動かない)、`delete.txt`、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む)、URL からのインストール (`\![execute,install,url]`・URL のドロップ)、インストール後の readme、ネットワーク更新 (`updates2.dau` / `updates.txt`。シェル・バルーンの OnUpdateOther…、`\![updateother,--balloon=…]`、checkonly・testonly・recovery、結果のまとめの OnUpdateResult(Ex)。配布先が CORS を許しているときだけ)、ゴーストキャッシュ (切り替えたゴーストを2体まで取っておく)、消滅 (`\![vanishbymyself]`・メニューの消滅指示) |
 | SHIORI | SHIORI/3.0 (GET / NOTIFY)、SHIORI/2.x (読み替え)、DLL 製 SHIORI を WebAssembly にしたもの (下記)、JavaScript 製 SHIORI (Web Worker 内で実行)、セーブデータの書き込み |
 | SAORI | SAORI/1.0。JavaScript で作り直したものと、WebAssembly にしたもの (下記)。どの SHIORI からも呼べる |
 | シェル | `surfaces.txt` / `surfaces*.txt` (新旧書式、MATERIA 式の見出し、`surface.append`、範囲指定、数字と名前のエイリアス)、element 合成 (element0 が無ければ surfaceN.png の上に重ねる、`--option` の切り抜き・拡大・透明度)、合成メソッド (multiply・screen・overlay・add など)、`.pna` / `use_self_alpha` (1・true・full) / 左上色の透過、collision / collisionex (region を含む)、`collision-sort` / `animation-sort`、cursor・tooltips ブレス、`point.basepos`、`balloon.offset*` (サーフェスごと・左右別)、`seriko.alignmenttodesktop`・`seriko.zorder`・`seriko.sticky-window`・`balloon.dontmove`・`sakura.defaultx` など既定の位置 |
 | SERIKO | sometimes / rarely / random / periodic / always / runonce / talk / yen-e / never / bind / starttalk / endtalk、overlay・overlay-fast・base・replace・interpolate・reduce・asis・move・start・stop・alternativestart など、`-1` / `-2`、`option,exclusive` (ID 指定可) / `background` / `shared-index`、アニメーションの名前 |
 | 着せ替え | `bindgroup` (メニューと `\![bind]`) |
-| バルーン | 画像バルーン (`balloons*.png` / `balloonk*.png`、descript と画像ごとの `balloons*s.txt`)、内蔵バルーン、左右の自動切り替え (キャラクターに被らない側)、矢印・クリック待ち・オンライン・SSTP のマーカーと送り主・ファイル数、カーソルとアンカーのマーカー (色・枠・下線)、文字の影・縁取り、ドラッグで動かす、拡大率 (シェルと別) |
+| バルーン | 画像バルーン (`balloons*.png` / `balloonk*.png`、descript と画像ごとの `balloons*s.txt`)、内蔵バルーン、左右の自動切り替え (キャラクターに被らない側)、矢印・クリック待ち・オンライン・SSTP のマーカーと送り主・ファイル数、カーソルとアンカーのマーカー (色・枠・下線)、文字の影・縁取り、縦書き (`vertical,1`)、ドラッグで動かす、拡大率 (シェルと別)、`\![execute,dumpballoon]` |
 | さくらスクリプト | `\0 \1 \p \s \i \b \n \n[half] \n[150] \w \_w \__w \_q \_s \c \x \t \e \- \+ \_+ \4 \5 \v \a \q (新旧書式) \__q \_a \f (align・valign・影・縁取り・マーカーの色を含む) \_n \_l \_b (切り抜き・拡大・前面・固定) \& \_u \_m \8 \_v \_V \__v \j \__c \__t \* \_?`、`%` 環境変数 (`%ms` などの言葉を含む)、`%property[]`、音声合成での読み上げ (オプション) |
 | `\![...]` | raise / notify / embed / raiseother / notifyother / timerraise / timernotify / timerraiseother / timernotifyother、change・call (random・sequential・lastinstalled)、open (inputbox・passwordinput・textareabox・dateinput・timeinput・sliderinput・ipinput・communicatebox・teachbox・dialog・browser・mailer・file・readme・terms・developer・surfacetest・aigraph・rateofusegraph・backlogviewer・errorlog など) / close、set (balloontimeout・choicetimeout・balloonwait・serikotalk・autoscroll・balloonoffset・balloonalign・balloonmarker・balloonnum・scaling・alpha・position・zorder・sticky-window・alignmenttodesktop・windowstate・property・otherghosttalk・othersurfacechange・syncobject・tasktrayicon・trayballoon) / reset、enter・leave (passivemode・inductionmode・onlinemode・nouserbreakmode・collisionmode)、lock・unlock (repaint・balloonrepaint・balloonmove)、bind / bind-noevent、anim (start・stop・pause・resume・offset・add)、sound (play・loop・load・pause・resume・stop・option・wait)、move / moveasync、wait,syncobject、execute (http-*・rss-*・install・extractarchive・compressarchive・createnar・createupdatedata・dumpsurface・resetwindowpos・resetballoonpos)、get,property / set,property、vanishbymyself、update / updatebymyself、reload / load / unload、quicksection |
-| イベント | 起動・終了・切り替え・呼び出し (OnInitialize / OnDestroy / OnCloseAll / OnGhostCalling / OnGhostCallComplete / OnOtherGhostBooted / OnOtherGhostClosed / OnVanished / OnOtherGhostVanished)、マウス (Down / Up / クリック / ダブルクリック / 3回以上 / 中ボタン / 移動 / 静止 / ホイール / ドラッグ / 当たり判定とキャラクターの出入り。重なったキャラクターはピクセル単位で判定)、キー、OnSecondChange / OnMinuteChange / OnHourTimeSignal、OnSurfaceChange / OnSurfaceRestore / OnOtherSurfaceChange、OnOverlap / OnOffscreen、選択肢・アンカー (Select・Ex・Enter・Hover・タイムアウト)、OnBalloonBreak / OnBalloonClose / OnBalloonTimeout、入力ボックス (OnUserInput / OnTextAreaInput / OnTeach / OnSystemDialog など)、OnTranslate、OnOtherGhostTalk、シェル・バルーン・着せ替えの変更、OnShellScaling / OnBalloonScaling、OnWindowStateMinimize / Restore、OnResetWindowPos、ファイル・URL・文字のドロップ、音 (OnSoundStop / OnSoundError)、HTTP・RSS、ネットワーク更新、消滅、トレイの通知、OnRecommendsiteChoice、インストール (Begin / Complete / Failure / Refuse)、起動時の NOTIFY (installedsakuraname・uniqueid・capability・OnNotifySelfInfo など) |
+| イベント | 起動・終了・切り替え・呼び出し (OnInitialize / OnDestroy / OnCloseAll / OnGhostCalling / OnGhostCallComplete / OnOtherGhostBooted / OnOtherGhostClosed / OnVanished / OnOtherGhostVanished)、マウス (Down / Up / クリック / ダブルクリック / 3回以上 / 中ボタン・戻る・進む (…Ex) / 右ドラッグのジェスチャー / 移動 / 静止 / ホイール / ドラッグ / 当たり判定とキャラクターの出入り。重なったキャラクターはピクセル単位で判定)、キー、OnSecondChange / OnMinuteChange / OnHourTimeSignal、OnSurfaceChange / OnSurfaceRestore / OnOtherSurfaceChange、OnOverlap / OnOffscreen / OnOtherOverlap / OnOtherOffscreen、選択肢・アンカー (Select・Ex・Enter・Hover・タイムアウト)、OnBalloonBreak / OnSSTPBreak / OnBalloonClose / OnBalloonTimeout、入力ボックス (OnUserInput / OnTextAreaInput / OnTeach / OnSystemDialog など)、OnTranslate、OnOtherGhostTalk、シェル・バルーン・着せ替えの変更、OnShellScaling / OnBalloonScaling、OnWindowStateMinimize / Restore、OnResetWindowPos、ファイル・フォルダ・URL・文字のドロップとその既定の処理 (OnPictureViewerOpen など)、音 (OnSoundStop / OnSoundError / OnSoundLoop / OnSoundSpectrum)、HTTP (進捗・ストリーミング)・RSS・iCal・予定表・WebSocket、ネットワーク更新、消滅 (OnVanishButtonHold を含む)、利用条件 (OnGhostTermsAccept / Decline)、OnRaiseOtherFailure / OnNotifyOtherFailure、範囲選択 (OnSelectMode…)、ゴーストキャッシュ (OnCacheSuspend / Restore)、x-ukagaka-link (OnXUkagakaLinkOpen)、ネットワーク・暗い表示・バッテリー・画面の大きさ・ゲームパッド・音声認識と音声合成の状態、トレイの通知、OnRecommendsiteChoice、インストール (Begin / Complete / CompleteEx / CompleteAll / Failure / Refuse)、nar・更新データの作成、起動時の NOTIFY (installedsakuraname・uniqueid・capability・OnNotifySelfInfo・OnLanguageChange・OnNotifyHolidayInfo (日本の祝日)・OnNotifyInternationalInfo・OnNotifyFontInfo など) |
 | プロパティ | system.* (ブラウザで分かるもの)、baseware.*、ghostlist / activeghostlist / balloonlist / history / rateofuselist、currentghost.* (scope・shelllist・balloon・status・seriko の cursor・tooltip・surfacelist・sticky-window・zorder・mousecursor・sound)、developer.log。[SET有効] のものは書き込める |
 | SSTP | SEND / NOTIFY / COMMUNICATE / EXECUTE / GIVE (下記の開発用 API と postMessage で受ける。ポート 9801 では待てない) |
-| 道具 | 開発用パレット、サーフェステスト、スクリプトログ、エラーログ、SHIORI リクエスト、使用率グラフ、AI グラフ、着せ替え一覧、画像ビューア、アーカイブビューア、readme / terms、最小化、位置のリセット、最近使ったゴースト |
+| 道具 | 開発用パレット、スクリプトを送るボックス、サーフェステスト、スクリプトログ、エラーログ、SHIORI リクエスト、使用率グラフ、AI グラフ、着せ替え一覧、画像ビューア、アーカイブビューア、readme / 利用条件、入力ボックスの候補 (inputbox.autocomplete)、最小化、位置のリセット、最近使ったゴースト |
 
 ### SHIORI について
 
@@ -91,6 +91,7 @@ Internet Explorer には対応していません。
 | 華和梨 7 | shiori.dll (kawari.ini)。SHIORI/2.x で話す | [kawari/kawari7](https://github.com/kawari/kawari7) |
 | なし栞 | nashi.dll | [yanashi-interface/nashi-shiori-studio](https://github.com/yanashi-interface/nashi-shiori-studio) |
 | minato (Rust) | shiori.dll (talks/main.mnt) | [mizuki-yura/minato](https://github.com/mizuki-yura/minato) |
+| pasta (Rust と Lua) | pasta.dll (pasta.toml) | [ekicyou/pasta](https://github.com/ekicyou/pasta) (LuaJIT の代わりに Lua 5.4 で動かす) |
 | kagari (Lua 5.4。kotori を含む) | kagari.dll | [Tatakinov/kagari_shiori](https://github.com/Tatakinov/kagari_shiori) |
 | quickshiori (QuickJS) | quickshiori.dll | [cronfox/quickshiori](https://github.com/cronfox/quickshiori) |
 
@@ -98,6 +99,8 @@ Internet Explorer には対応していません。
 
 - **下の表に無い SAORI と、プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
 - **.NET (dnproxy)・PowerShell (powershiori) の SHIORI** は、ブラウザで動く実行環境が無いので動きません。
+- **蒼空 (aosora)** は、ソースの使い方が個人利用に限られている (まだライセンスが決まっていない) ので組み込んでいません。
+- pasta は LuaJIT の代わりに標準の Lua 5.4 で動かすので、LuaJIT にしか無いもの (`jit`・`ffi`・`bit`) を使う台本は動きません。
 - minato が内部でパニックした場合、その SHIORI はそこで止まります (Safari 12 で動かすため、Rust の例外処理を使わずに組んでいます)。
 
 上のどれにも当たらない SHIORI のゴーストは、シェルの表示とメニューだけが使え、起動時にその旨をバルーンで知らせます。
@@ -130,6 +133,9 @@ WebAssembly にしたもの (ソースからビルドして `index.html` に組�
 | saori-pie-chart (円グラフ) | piechart.dll | [tukinami/saori-pie-chart](https://github.com/tukinami/saori-pie-chart) |
 | saori-qrcode (QR コード) | saori_qrcode.dll | [nikolat/saori-qrcode](https://github.com/nikolat/saori-qrcode) |
 | yaya-as-saori (YAYA を SAORI として使う) | yaya.dll | [YAYA-shiori/yaya-as-saori](https://github.com/YAYA-shiori/yaya-as-saori) (中身は上の YAYA) |
+| sqlori-sqlite2 (SQLite 2) | sqlori-sqlite2.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
+| kisaragi (MeCab) | kisaragi.dll | [ukatech/csaori](https://github.com/ukatech/csaori) と [taku910/mecab](https://github.com/taku910/mecab)。辞書 (dic/) はゴーストが同梱したものを使う |
+| saori_satori・saori_kawari・saori_yaya (ninix-saori) | 同じ名前 | [Tatakinov/ninix-saori](https://github.com/Tatakinov/ninix-saori)。中身は上の里々・華和梨・YAYA |
 
 JavaScript で作り直したもの (ブラウザでできることで答えます):
 
@@ -144,6 +150,14 @@ JavaScript で作り直したもの (ブラウザでできることで答えま�
 | bignum | bignum.dll | 任意の桁の計算 ([decimal.js](https://github.com/MikeMcl/decimal.js)) |
 | totp_saori | totp_saori.dll | ワンタイムパスワード (TOTP) |
 | KeywordReg | KeywordReg.dll | `keyword.txt` のキーワードを探す。漢字の読みは分からない (IME が無い) ので、カタカナとひらがなをそろえるだけ |
+| chttpc | chttpc.dll | URL・`file:` から取る。translate・strip・start / end・save などのオプション。終わってから知らせる使い方 (hwnd・id) はできないので、その場で返す |
+| saori_curl (ninix-saori) | saori_curl.dll | URL から UTF-8 の文字を取る。ゴーストに無くても名前で使える |
+| ip.dll (saori_ip)・iptools・uds | ip.dll・iptools.dll・uds.dll | ブラウザから分かることだけ答える (この機械の IP アドレスは 127.0.0.1、whois やダイヤルアップは失敗) |
+| FileVersion | FileVersion.dll | ゴーストの中の DLL・EXE のバージョン情報を読む |
+| AqTalkSaori | AqTalkSaori.dll | AquesTalk の代わりにブラウザの音声合成で読む (WAV は作れない) |
+| MakotoUtil | MakotoUtil.dll | SAORI は待てないので、キーは押されていない・入力ボックスは初期値・メッセージボックスは OK と答える |
+| nullsaori・SaoriTest・example (ninix-saori) | nullsaori.dll など | 元と同じ答え |
+| Windows の機能そのもの (SetCursorPos・Osuwari・screenshot・set_wall_paper・steam_api・tsvnexec・cmdrunner・imoutomessenger・gainer・effect_wrapper・proxy_ex・saori_call_translator) | それぞれの DLL | ブラウザでは行えないので、元の SAORI が「できなかった」ときの答えを返す (ゴーストの台本は止まらない) |
 
 SAORI について、できないこと・違うこと:
 
@@ -153,7 +167,10 @@ SAORI について、できないこと・違うこと:
 - saori-pie-chart は字体が無いので、円グラフの文字 (ラベル) を描きません。
 - saori-resized-png は、AVIF と OpenEXR の画像を読めません (C のライブラリやスレッドを使うため)。
 - saori-japanese-gengou の「今日」は、世界時 (UTC) の日付になります。
-- WebAssembly の SAORI を組み込んだので、`index.html` と `engawa-embed.js` はそれぞれ約 11.5 MB です (SAORI の分が約 5.6 MB)。
+- 灯 as SAORI (akari.dll) は、灯の本体のソースが公開されていないので使えません。
+- 蒼空を SAORI として使う saori_aosora (ninix-saori) は、上の理由で蒼空を組み込んでいないので使えません。
+- ネットワークを使う SAORI (chttpc・saori_curl・ip.dll) は、相手のサーバーが CORS を許していないと失敗します。
+- WebAssembly の SHIORI・SAORI を組み込んだので、`index.html` と `engawa-embed.js` はそれぞれ約 14 MB です。
 
 #### JavaScript で SHIORI を書く
 
@@ -203,7 +220,9 @@ engawaWindow.postMessage({ type: 'sstp', id: 1, request: 'NOTIFY SSTP/1.1\r\nSen
 
 ### ブラウザではできないこと
 
-DLL のプラグイン・ヘッドラインの実行、FMO、ポート 9801 の SSTP、時計合わせ (SNTP)、メールチェック (biff)、ping・nslookup・filewatch・ごみ箱、壁紙、ほかのアプリのウインドウ (OnOverlap などはゴースト自身のキャラクターだけ)、エディタ・エクスプローラなどほかのアプリを開くこと、CD の再生、`\m` (ウインドウメッセージ)。`\![open,dialog,folder]` は取り消しとして扱い、`\![open,dialog,save]` はダウンロードになります。
+DLL のプラグイン・ヘッドラインの実行、FMO、ポート 9801 の SSTP、時計合わせ (SNTP)、メールチェック (biff)、ping・nslookup・filewatch・ごみ箱、壁紙、ほかのアプリのウインドウ (OnOverlap などは起動中のゴーストのキャラクターだけ)、メディアプレーヤーの曲 (OnMusicPlay)、スリープ・ロック・スクリーンセーバー・仮想デスクトップ・CPU やメモリの負荷・デバイスの抜き差し、エディタ・エクスプローラなどほかのアプリを開くこと、CD の再生、`\m` (ウインドウメッセージ)。
+
+違うところ: `\![open,dialog,folder]` は取り消しとして扱い、`\![open,dialog,save]` はダウンロードになります。バッテリーは Chrome など Battery Status API のあるブラウザ、音声認識は Web Speech API のあるブラウザ (Chrome など) だけです。フォントの一覧 (OnNotifyFontInfo) は、よくあるフォントのうち入っているものだけを答えます。iCal・WebSocket も相手が CORS (WebSocket は接続) を許しているときだけです。ゴーストキャッシュにあるゴーストのセーブデータは、ページを閉じる・隠すときに書かれます。
 
 ## 構成
 

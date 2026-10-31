@@ -10,7 +10,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { cpus, homedir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { delimiter, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { ENGINES } from './engines.mjs';
@@ -47,6 +47,8 @@ function checkEmscripten() {
 }
 
 const env = { ...process.env, EM_CONFIG: emConfig, EMSDK: emsdk };
+/** Windows では環境変数の名前が Path のことがある */
+const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
 
 function run(tool, args, cwd) {
   return new Promise((resolve, reject) => {
@@ -206,7 +208,24 @@ async function buildRust(engine, src, buildDir) {
         'staticlib',
         ...(engine.rust.package ? ['-p', engine.rust.package] : []),
       ],
-      { cwd: crate, env: { ...env, CARGO_TARGET_DIR: target, RUSTFLAGS: '-Cpanic=abort', CARGO_PROFILE_RELEASE_PANIC: 'abort' }, stdio: ['ignore', 'pipe', 'pipe'] },
+      {
+        cwd: crate,
+        env: {
+          ...env,
+          CARGO_TARGET_DIR: target,
+          RUSTFLAGS: '-Cpanic=abort',
+          CARGO_PROFILE_RELEASE_PANIC: 'abort',
+          // 依存のクレートが自分で wasm をリンクすることがある (rustc は PATH の emcc を使う)
+          [pathKey]: `${emDir}${delimiter}${env[pathKey] ?? ''}`,
+          // C のソースを含むクレート (mlua の Lua など) は cc クレートが emcc で組む
+          CC_wasm32_unknown_emscripten: join(emDir, process.platform === 'win32' ? 'emcc.bat' : 'emcc'),
+          AR_wasm32_unknown_emscripten: join(emDir, process.platform === 'win32' ? 'emar.bat' : 'emar'),
+          // setjmp / longjmp (Lua のエラー) は、ほかの SHIORI と同じく wasm の例外を使わないやり方で組む (Safari 12 で読めるように)
+          // rust.cflags はそのクレートの C のソースにだけ要るもの
+          CFLAGS_wasm32_unknown_emscripten: ['-sSUPPORT_LONGJMP=emscripten', ...(engine.rust.cflags ?? [])].join(' '),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
     );
     let out = '';
     p.stdout.on('data', (d) => (out += d));
@@ -241,8 +260,11 @@ function licenseText(spec, locate) {
 
 const section = (title, text) => `${'-'.repeat(72)}\n${title}\n${'-'.repeat(72)}\n\n${text}\n`;
 
-/** Rust の依存クレート (wasm に入るもの) のライセンス。ビルドのときだけ使うクレート (build・proc-macro) は除く */
-function rustLicenses(crate) {
+/**
+ * Rust の依存クレート (wasm に入るもの) のライセンス。ビルドのときだけ使うクレート (build・proc-macro) は除く。
+ * package はワークスペースのうち組み込むクレートの名前 (ワークスペースだけの Cargo.toml では root が無いため)
+ */
+function rustLicenses(crate, packageName) {
   const meta = JSON.parse(
     execFileSync(cargo, ['+nightly', 'metadata', '--format-version', '1', '--filter-platform', 'wasm32-unknown-emscripten'], {
       cwd: crate,
@@ -254,7 +276,9 @@ function rustLicenses(crate) {
   const packages = new Map(meta.packages.map((p) => [p.id, p]));
   const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
   const seen = new Set();
-  const queue = [meta.resolve.root];
+  const rootId = packageName ? meta.packages.find((p) => p.name === packageName && p.source === null)?.id : meta.resolve.root;
+  const ownIds = new Set(meta.workspace_members ?? []);
+  const queue = [rootId];
   while (queue.length) {
     const id = queue.shift();
     if (seen.has(id)) continue;
@@ -272,7 +296,7 @@ function rustLicenses(crate) {
     const dir = dirname(pkg.manifest_path);
     // 本体と、native/shim の代わりのクレートは載せない。rust.vendor で直したもの (build/…/vendor) は載せる
     const vendored = pkg.source === null && /[\\/]vendor[\\/]/.test(dir);
-    if (id === meta.resolve.root || (pkg.source === null && !vendored)) continue;
+    if (id === rootId || ownIds.has(id) || (pkg.source === null && !vendored)) continue;
     const files = readdirSync(dir).filter((f) => /^(licen[cs]e|copying|unlicense|notice)/i.test(f));
     // MIT を選べるものは MIT の条文だけを載せる
     const mit = /\bMIT\b/.test(pkg.license ?? '') && files.find((f) => /^licen[cs]e-mit/i.test(f));
@@ -453,7 +477,7 @@ async function build(engine) {
   }
   const outJs = join(buildDir, `${engine.name}.mjs`);
   const exportsList = ['_load', '_unload', '_request', '_malloc', '_free', ...(engine.exports ?? [])];
-  await run(
+  const linked = await run(
     'em++',
     [
       '-O2',
@@ -468,6 +492,8 @@ async function build(engine) {
     ],
     src,
   );
+  // 関数の型の食い違いなど、動かしたときに止まるもとになる警告は見せる
+  if (/warning/i.test(linked)) console.log(`[${engine.name}] ${linked.trim()}`);
   const out = outDirOf(engine);
   mkdirSync(out, { recursive: true });
   const wasm = readFileSync(outJs.replace(/\.mjs$/, '.wasm'));
@@ -483,7 +509,7 @@ async function build(engine) {
     join(out, `${engine.name}.d.mts`),
     `// native/build.mjs が作ったもの。手で編集しない\nimport type { EngineFactory } from '../../shiori/native-engines';\ndeclare const create: EngineFactory;\nexport default create;\n`,
   );
-  writeLicenses(engine, locate, engine.rust ? [section('Rust の標準ライブラリ (The Rust Project Developers、MIT OR Apache-2.0)', readFileSync(join(rustToolchain('nightly'), 'share', 'doc', 'cargo', 'LICENSE-MIT'), 'utf-8').trim()), ...rustLicenses(join(buildDir, 'crate'))] : []);
+  writeLicenses(engine, locate, engine.rust ? [section('Rust の標準ライブラリ (The Rust Project Developers、MIT OR Apache-2.0)', readFileSync(join(rustToolchain('nightly'), 'share', 'doc', 'cargo', 'LICENSE-MIT'), 'utf-8').trim()), ...rustLicenses(join(buildDir, 'crate'), engine.rust.package)] : []);
   console.log(`[${engine.name}] ${relative(root, out)}/${engine.name}.wasm.gz  ${(wasm.length / 1e6).toFixed(2)} MB → ${(gz.length / 1e6).toFixed(2)} MB`);
 }
 

@@ -327,6 +327,13 @@ html.over-character * {
   font-size: calc(var(--b-size) * 0.85);
 }
 
+/* 縦書きのバルーン (descript の vertical,1)。行は右から左へ進み、横にスクロールする */
+.balloon.vertical .balloon-text {
+  writing-mode: vertical-rl;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .balloon-text::-webkit-scrollbar {
   display: none;
 }
@@ -1105,6 +1112,32 @@ html.over-character * {
 .toast .btn-icon {
   min-height: var(--control-height);
   min-width: var(--titlebar-button);
+}
+
+/* オプションのページごとのヘルプ (?) */
+.section-help {
+  margin-left: var(--space-2);
+  min-height: 0;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------ 矩形選択モード (\![enter,selectmode]) */
+
+.select-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 250;
+  pointer-events: auto;
+  cursor: crosshair;
+  outline: 1px dashed var(--accent);
+}
+
+.select-box {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(0, 120, 215, 0.15);
+  pointer-events: none;
 }
 
 /* ------------------------------------------------------------------ ツールチップ (当たり判定・選択肢) */

@@ -46,8 +46,15 @@ export function openTool(host: ToolHost, g: Ghost, tool: ToolName, args: string[
     }
     case 'terms': {
       const text = ghostText(g, [g.descript.str('terms') || 'terms.txt', 'terms.txt']);
-      if (text) showText(`${g.name} - 利用規約`, text);
-      else host.toast(`「${g.name}」には terms.txt がありません`);
+      // 利用条件ダイアログ: 受諾・拒否でゴーストに知らせる (右上の閉じるでは何も送らない)
+      if (text) {
+        showText(`${g.name} - 利用条件`, text, {
+          actions: [
+            { label: '拒否', run: () => void g.raise('OnGhostTermsDecline') },
+            { label: '受諾', run: () => void g.raise('OnGhostTermsAccept') },
+          ],
+        });
+      } else host.toast(`「${g.name}」には terms.txt がありません`);
       return;
     }
     case 'help':
@@ -99,6 +106,9 @@ export function openTool(host: ToolHost, g: Ghost, tool: ToolName, args: string[
       return;
     case 'archiveviewer':
       archive(host, g, args[0]);
+      return;
+    case 'sendbox':
+      sendBox(g);
       return;
   }
 }
@@ -167,6 +177,40 @@ function developer(host: ToolHost, g: Ghost): void {
   showPanel(`開発用パレット - ${g.name}`, box, () => {
     if (collisions) void g.command(['leave', 'collisionmode'], 0);
   });
+}
+
+/** スクリプトを送るボックス (SSP の Script Input)。送ったものは履歴から選び直せる */
+const sentScripts: string[] = [];
+
+function sendBox(g: Ghost): void {
+  const area = el('textarea', { className: 'text-input text-area', rows: 3, placeholder: '\\h\\s[0]こんにちは。\\e' });
+  const history = el('select', { className: 'text-input' }, el('option', { value: '' }, '(これまでに送ったもの)'));
+  const refresh = () => {
+    history.replaceChildren(el('option', { value: '' }, '(これまでに送ったもの)'), ...sentScripts.map((s) => el('option', { value: s }, s.slice(0, 60))));
+  };
+  refresh();
+  history.addEventListener('change', () => {
+    if (history.value) area.value = history.value;
+  });
+  const send = button('送る', 'primary', () => {
+    const script = area.value.trim();
+    if (!script) return;
+    void g.playScript(script, { kinds: ['owned'] });
+    const at = sentScripts.indexOf(script);
+    if (at >= 0) sentScripts.splice(at, 1);
+    sentScripts.unshift(script);
+    sentScripts.splice(20);
+    refresh();
+  });
+  // Ctrl+Enter で送る
+  area.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      send.click();
+    }
+  });
+  showPanel(`スクリプトを送る - ${g.name}`, el('div', { className: 'tool-stack' }, area, history, send));
+  area.focus();
 }
 
 /** サーフェステスト: サーフェスの一覧から選んで出す */

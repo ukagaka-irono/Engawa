@@ -23,6 +23,20 @@ interface AddedLayer {
   y: number;
 }
 
+/** \![anim,add,text,…] で今のサーフェスに出した文字 */
+export interface AddedText {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  /** この時刻 (performance.now) を過ぎたら消す。0 なら消さない */
+  until: number;
+  color: string;
+  size: number;
+  font: string;
+}
+
 const CONTROL = new Set(['start', 'stop', 'alternativestart', 'alternativestop', 'parallelstart', 'parallelstop']);
 /** 1フレームで進めるパターン数の上限 (待ち時間 0 のループで固まらないように) */
 const MAX_STEPS_PER_TICK = 64;
@@ -176,6 +190,7 @@ export class SurfaceRenderer {
     this.def = def;
     this.appliedShell = shell;
     this.added = [];
+    this.texts = [];
     this.addedBase = undefined;
     this.addedMove = undefined;
     this.anims = new Map(
@@ -273,6 +288,42 @@ export class SurfaceRenderer {
     else this.added.push({ method, surface, x, y });
     if (surface >= 0) void this.shell.load(surface);
     this.dirty = true;
+  }
+
+  /** \![anim,add,text]: 枠 (x, y, width, height) の中に文字を出す。time ms で消える (0 なら消えない) */
+  addText(t: Omit<AddedText, 'until'> & { time: number }): void {
+    this.texts.push({ ...t, until: t.time > 0 ? performance.now() + t.time : 0 });
+    this.dirty = true;
+    if (t.time > 0) setTimeout(() => (this.dirty = true), t.time + 20);
+  }
+
+  private texts: AddedText[] = [];
+
+  /** 文字を枠の中で折り返して描く。時間の過ぎたものは捨てる */
+  private drawTexts(ctx: CanvasRenderingContext2D): void {
+    const now = performance.now();
+    this.texts = this.texts.filter((t) => !t.until || t.until > now);
+    for (const t of this.texts) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(t.x, t.y, t.width || this.canvas.width - t.x, t.height || this.canvas.height - t.y);
+      ctx.clip();
+      ctx.fillStyle = t.color;
+      ctx.font = `${t.size}px ${t.font}`;
+      ctx.textBaseline = 'top';
+      const maxWidth = t.width || this.canvas.width - t.x;
+      let line = '';
+      let y = t.y;
+      for (const ch of t.text) {
+        if (ch === '\n' || (line && ctx.measureText(line + ch).width > maxWidth)) {
+          ctx.fillText(line, t.x, y);
+          y += t.size * 1.25;
+          line = ch === '\n' ? '' : ch;
+        } else line += ch;
+      }
+      if (line) ctx.fillText(line, t.x, y);
+      ctx.restore();
+    }
   }
 
   /** そのスコープが喋り始めた (starttalk)・喋り終えた (endtalk) */
@@ -512,6 +563,7 @@ export class SurfaceRenderer {
       const img = this.surface(a.surface);
       if (img) drawWithMethod(ctx, img, a.method, a.x, a.y);
     }
+    this.drawTexts(ctx);
     ctx.restore();
     if (this.collisionMode) this.drawCollisions();
   }

@@ -54,12 +54,22 @@ export interface CharacterViewHandlers {
   /** ドラッグで動いた量 (いっしょに動くキャラクター用、sticky-window) */
   dragged(dx: number, dy: number): void;
   pointerDown(): void;
+  /** 左・右以外のボタン (中・戻る・進む) を押した・放した。name は middle・xbutton1・xbutton2 */
+  mouseDownEx(e: CharacterMouseEvent, name: string): void;
+  mouseUpEx(e: CharacterMouseEvent, name: string, clicked: boolean): void;
+  /** 右ドラッグのジェスチャー。direction は left_up・up…・circle.cw・circle.ccw・end */
+  gesture(e: CharacterMouseEvent, start: CharacterMouseEvent, direction: string): void;
 }
 
 /** デスクトップのどの端に吸着するか (alignmenttodesktop) */
 export type Alignment = 'bottom' | 'top' | 'left' | 'right' | 'free';
 
 const DRAG_THRESHOLD = 4;
+/** ジェスチャーの1画とみなす動きの長さ (px) */
+const GESTURE_STEP = 24;
+const GESTURE_NAMES = ['right', 'right_down', 'down', 'left_down', 'left', 'left_up', 'up', 'right_up'];
+/** 左・右以外のボタンの名前 (MouseEvent.button) */
+const EX_BUTTONS: Record<number, string> = { 1: 'middle', 3: 'xbutton1', 4: 'xbutton2' };
 const MOVE_THROTTLE_MS = 50;
 const HOVER_MS = 600;
 const MULTI_CLICK_MS = 450;
@@ -94,6 +104,9 @@ export class CharacterView {
   private readonly desktop: HTMLElement;
   private hoverTimer?: number;
   private lastClick?: { at: number; count: number };
+  private lastExClick?: { at: number; count: number; button: number };
+  /** 右ドラッグのジェスチャーの途中 */
+  private gestureState?: { start: CharacterMouseEvent; x: number; y: number; dirs: string[]; moved: boolean };
   private moveAnim?: number;
 
   constructor(
@@ -275,6 +288,8 @@ export class CharacterView {
   pointerDown(e: PointerInput): void {
     this.on.pointerDown();
     clearTimeout(this.hoverTimer);
+    if (EX_BUTTONS[e.button]) this.on.mouseDownEx(this.event(e), EX_BUTTONS[e.button]);
+    if (e.button === 2) this.gestureState = { start: this.event(e), x: e.clientX, y: e.clientY, dirs: [], moved: false };
     if (e.button === 0) {
       this.drag = { x: e.clientX, y: e.clientY, right: this.right, bottom: this.bottom, moved: false, last: { x: e.clientX, y: e.clientY } };
       this.on.mouseDown(this.event(e));
@@ -314,6 +329,51 @@ export class CharacterView {
     if (cancelled) return;
     const clicked = this.hit(e.clientX, e.clientY);
     this.on.mouseUp(this.event(e, 0, clicked ? this.countClick() : 1), clicked);
+  }
+
+  /** 左・右以外のボタンを放した (CharacterLayer から) */
+  exUp(e: MouseLike): void {
+    const name = EX_BUTTONS[e.button];
+    if (!name) return;
+    const clicked = this.hit(e.clientX, e.clientY);
+    const now = performance.now();
+    const prev = this.lastExClick;
+    const count = clicked && prev && prev.button === e.button && now - prev.at < MULTI_CLICK_MS ? prev.count + 1 : 1;
+    if (clicked) this.lastExClick = { at: now, count, button: e.button };
+    this.on.mouseUpEx(this.event(e, 0, count), name, clicked);
+  }
+
+  /** 右ボタンを押したまま動かした。1画ごとに向きを知らせ、四方を回ったら circle */
+  gestureMove(e: MouseLike): void {
+    const g = this.gestureState;
+    if (!g) return;
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    if (Math.hypot(dx, dy) < GESTURE_STEP) return;
+    g.x = e.clientX;
+    g.y = e.clientY;
+    g.moved = true;
+    const dir = GESTURE_NAMES[((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8];
+    if (g.dirs[g.dirs.length - 1] === dir) return;
+    g.dirs.push(dir);
+    this.on.gesture(this.event(e), g.start, dir);
+    // 上下左右を順に回った (右→下→左→上 は時計回り)
+    const cardinal = g.dirs.filter((d) => !d.includes('_')).slice(-4).join(',');
+    const cw = ['right,down,left,up', 'down,left,up,right', 'left,up,right,down', 'up,right,down,left'];
+    const ccw = ['right,up,left,down', 'up,left,down,right', 'left,down,right,up', 'down,right,up,left'];
+    if (cw.includes(cardinal) || ccw.includes(cardinal)) {
+      this.on.gesture(this.event(e), g.start, cw.includes(cardinal) ? 'circle.cw' : 'circle.ccw');
+      g.dirs = [];
+    }
+  }
+
+  /** 右ボタンを放した。ジェスチャーをしていたら true (メニューは出さない) */
+  gestureEnd(e: MouseLike): boolean {
+    const g = this.gestureState;
+    this.gestureState = undefined;
+    if (!g?.moved) return false;
+    this.on.gesture(this.event(e), g.start, 'end');
+    return true;
   }
 
   /** 続けてクリックした回数を数える */

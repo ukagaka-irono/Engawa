@@ -18,7 +18,30 @@ export type JsSaoriKind =
   | 'getdesktopinfo'
   | 'bignum'
   | 'totp'
-  | 'keywordreg';
+  | 'keywordreg'
+  | 'curl'
+  | 'chttpc'
+  | 'saori_ip'
+  | 'iptools'
+  | 'uds'
+  | 'nullsaori'
+  | 'saoritest'
+  | 'example'
+  | 'call_translator'
+  | 'fileversion'
+  | 'makotoutil'
+  | 'aqtalk'
+  | 'setcursorpos'
+  | 'osuwari'
+  | 'screenshot'
+  | 'set_wall_paper'
+  | 'steam_api'
+  | 'tsvnexec'
+  | 'cmdrunner'
+  | 'imoutomessenger'
+  | 'gainer'
+  | 'effect_wrapper'
+  | 'proxy_ex';
 
 /** WebAssembly にしたもの (native/saoris.mjs) */
 export const WASM_SAORI_KINDS = [
@@ -37,6 +60,10 @@ export const WASM_SAORI_KINDS = [
   'piechart',
   'ssu',
   'yaya',
+  'satori',
+  'kawari',
+  'kisaragi',
+  'sqlori2',
 ] as const;
 export type WasmSaoriKind = (typeof WASM_SAORI_KINDS)[number];
 
@@ -48,6 +75,11 @@ interface Rule {
   names: string[];
   /** DLL の中身に含まれる文字列 (名前を変えた DLL でも見分けられる) */
   signatures: string[];
+  /**
+   * ゴーストに DLL が無くても使えるもの (ninix-saori。ninix ではベースウェアの側に置くので、ゴーストは同梱しない)。
+   * そのファイル名で開かれたら、この SAORI を渡す
+   */
+  builtin?: boolean;
 }
 
 const RULES: Rule[] = [
@@ -63,10 +95,38 @@ const RULES: Rule[] = [
   { kind: 'bignum', names: ['bignum.dll'], signatures: ['bignum.dll'] },
   { kind: 'totp', names: ['totp_saori.dll'], signatures: ['totp_saori.dll'] },
   { kind: 'keywordreg', names: ['keywordreg.dll'], signatures: ['KeywordReg.dll'] },
+  { kind: 'chttpc', names: ['chttpc.dll'], signatures: ['chttpc.dll'] },
+  { kind: 'saori_ip', names: ['ip.dll'], signatures: ['GetInternetIP'] },
+  { kind: 'iptools', names: ['iptools.dll'], signatures: ['iptools.dll'] },
+  { kind: 'uds', names: ['uds.dll'], signatures: ['UpDownSpeed'] },
+  { kind: 'nullsaori', names: ['nullsaori.dll'], signatures: ['nullsaori.dll'] },
+  { kind: 'saoritest', names: ['saoritest.dll'], signatures: ['SaoriTest.dll'] },
+  { kind: 'fileversion', names: ['fileversion.dll'], signatures: ['FileVersion.dll'] },
+  { kind: 'makotoutil', names: ['makotoutil.dll'], signatures: ['MakotoUtil.dll'] },
+  { kind: 'aqtalk', names: ['aqtalksaori.dll'], signatures: ['AquesTalk.dll'] },
+  // Windows の機能そのものを使うもの (ブラウザでは行えないので、できなかったときの答えを返す)
+  { kind: 'setcursorpos', names: ['setcursorpos.dll'], signatures: ['SetCursorPos.dll'] },
+  { kind: 'osuwari', names: ['osuwari.dll'], signatures: ['Osuwari.dll'] },
+  { kind: 'screenshot', names: ['screenshot.dll'], signatures: ['screenshot.dll'] },
+  { kind: 'set_wall_paper', names: ['set_wall_paper.dll'], signatures: ['set_wall_paper.dll'] },
+  { kind: 'tsvnexec', names: ['tsvnexec.dll'], signatures: ['tsvnexec.dll'] },
+  { kind: 'cmdrunner', names: ['cmdrunner.dll'], signatures: ['cmdrunner.dll'] },
+  { kind: 'imoutomessenger', names: ['imoutomessenger.dll'], signatures: ['imoutomessenger.dll'] },
+  { kind: 'gainer', names: ['gainer.dll'], signatures: ['gainer.dll'] },
+  { kind: 'effect_wrapper', names: ['effect_wrapper.dll'], signatures: ['effect_wrapper.dll'] },
+  { kind: 'proxy_ex', names: ['proxy_ex.dll'], signatures: ['proxy_ex.dll'] },
+  { kind: 'steam_api', names: ['steam_api.dll'], signatures: [] },
+  // ninix-saori (ninix-kagari のベースウェア側の SAORI)
+  { kind: 'curl', names: ['saori_curl.dll'], signatures: ['saori-curl'], builtin: true },
+  { kind: 'example', names: ['example.dll'], signatures: [], builtin: true },
+  { kind: 'call_translator', names: ['saori_call_translator.dll'], signatures: [], builtin: true },
   // WebAssembly にしたもの
   { kind: 'timebkn', names: ['timebkn.dll'], signatures: ['timebkn.dll'] },
   { kind: 'xaoric', names: ['xaoric.dll'], signatures: ['xaoric.dll'] },
+  // SQLite 2 で組んだ古い sqlori (データベースのファイルが SQLite 3 と違う)
+  { kind: 'sqlori2', names: ['sqlori-sqlite2.dll', 'sqlori_sqlite2.dll'], signatures: ['SQLite 2.1 database'] },
   { kind: 'sqlori', names: ['sqlori.dll'], signatures: ['sqlori.dll'] },
+  { kind: 'kisaragi', names: ['kisaragi.dll'], signatures: ['kisaragi.dll'] },
   { kind: 'mahjongutil', names: ['mahjongutil.dll'], signatures: ['MahjongUtil.dll'] },
   { kind: 'texasholdem', names: ['texasholdemutil.dll'], signatures: ['TexasHoldemUtil.dll'] },
   { kind: 'nodoka', names: ['nodoka.dll'], signatures: ['nodoka.dll'] },
@@ -79,11 +139,20 @@ const RULES: Rule[] = [
   { kind: 'piechart', names: ['piechart.dll'], signatures: ['piechart.dll'] },
   { kind: 'ssu', names: ['ssu.dll'], signatures: ['ssu.dll'] },
   // SAORI として開かれた YAYA (yaya-as-saori。中身は YAYA の SHIORI そのもの)
-  { kind: 'yaya', names: ['yaya.dll'], signatures: ['yaya.dll'] },
+  { kind: 'yaya', names: ['yaya.dll', 'saori_yaya.dll'], signatures: ['yaya.dll'] },
+  // ninix-saori の、里々・華和梨を SAORI として使うもの (要求をそのまま SHIORI に渡す)
+  { kind: 'satori', names: ['saori_satori.dll'], signatures: [] },
+  { kind: 'kawari', names: ['saori_kawari.dll'], signatures: [] },
 ];
 
 /** WebAssembly にしたものか (メインスレッドが本体を送る) */
 export const isWasmSaori = (kind: SaoriKind): kind is WasmSaoriKind => (WASM_SAORI_KINDS as readonly SaoriKind[]).includes(kind);
+
+/** ゴーストに無くても使える SAORI (ninix-saori) のファイル名なら、その種類 */
+export function builtinSaori(path: string): SaoriKind | undefined {
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+  return RULES.find((r) => r.builtin && r.names.includes(name))?.kind;
+}
 
 /** 中身の文字列で見分け、分からなければファイル名で決める */
 export function detectSaori(path: string, data: Uint8Array): SaoriKind | undefined {

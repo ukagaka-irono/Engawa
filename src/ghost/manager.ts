@@ -1,11 +1,11 @@
 import { BalloonSkin } from '../balloon/skin';
 import { Descript } from '../package/descript';
-import { acceptNamesOf, InstallError, installFiles, type InstallResult, type InstallTarget } from '../package/installer';
+import { acceptNamesOf, InstallError, installFiles, type Installed, type InstallResult, type InstallTarget } from '../package/installer';
 import { CharacterLayer } from '../shell/character-layer';
 import { Shell } from '../shell/shell';
 import { confirmDialog, InputBox, packageKindLabel, showHelp, showInfo, showLicenses, showOptions, showPackages, showText, Toasts } from '../ui/dialogs';
 import { hasReadme, openTool, type ToolHost } from '../ui/tools';
-import { networkUpdate } from '../package/update';
+import { networkUpdate, updateResultRefs, type UpdateSummary } from '../package/update';
 import { licenseText } from '../ui/licenses';
 import { el } from '../ui/dom';
 import { menuSkin } from '../ui/menu-skin';
@@ -15,6 +15,7 @@ import type { FileTree } from '../vfs/files';
 import { decodeText } from '../util/text';
 import {
   deletePackage,
+  deletePackageFiles,
   isPersistent,
   listPackages,
   patchPackageMeta,
@@ -35,9 +36,11 @@ import {
   type InputRequest,
   type InputResult,
   type ToolName,
+  type UpdateRequest,
 } from './ghost';
 import type { LogEntry } from './properties';
 import { addHistory, saveSettings, saveSettingsNow, settings } from './settings';
+import { EnvironmentEvents } from './environment';
 import { handleSstp, type SstpHost } from './sstp';
 
 // ビルドでは data: URL として index.html に埋め込まれる (file:// で開いても読めるように)
@@ -103,6 +106,8 @@ export class GhostManager implements GhostEnv {
   /** 最後にインストールしたものの名前 (lastinstalled・%lastobjectname) */
   private readonly lastInstalledNames: Partial<Record<string, string>> = {};
   private readonly sstpCookies = loadCookies();
+  /** ネットワーク・バッテリー・ゲームパッドなど、まわりの変化 */
+  private readonly environment: EnvironmentEvents;
 
   /**
    * embedded: よそのページに埋め込んで使う (ななろだのおためし起動など。src/embed.ts)。
@@ -124,6 +129,15 @@ export class GhostManager implements GhostEnv {
     this.emptyState = overlay.querySelector('.empty-state')!;
     this.emptyButton = this.emptyState.querySelector('button')!;
     this.emptyButton.addEventListener('click', () => this.emptyAction());
+    this.environment = new EnvironmentEvents(
+      () => this.ghosts,
+      () => this.current,
+      desktop,
+    );
+  }
+
+  environmentNotices(ghost: Ghost): Promise<void> {
+    return this.environment.bootNotices(ghost);
   }
 
   async init(): Promise<void> {
@@ -131,9 +145,12 @@ export class GhostManager implements GhostEnv {
     this.startClock();
     const loop = (now: number) => {
       for (const g of this.ghosts) g.tick(now);
+      this.environment.tick();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+    this.environment.start();
+    window.setInterval(() => this.environment.second(), 1000);
 
     await this.refreshPackages();
     if (this.options.embedded) return;
@@ -144,6 +161,9 @@ export class GhostManager implements GhostEnv {
     }
     if (!this.packages.some((p) => p.kind === 'ghost')) await this.installSample();
     await this.bootDefault();
+    // アドレスに書かれた x-ukagaka-link (?x-ukagaka-link=… か #x-ukagaka-link:…) は、ゴーストが起きてから開く
+    const link = new URLSearchParams(location.search).get('x-ukagaka-link') ?? (/^#(x-ukagaka-link:.*)$/i.exec(decodeURIComponent(location.hash))?.[1] ?? null);
+    if (link) window.setTimeout(() => this.openUkagakaLink(link.startsWith('x-ukagaka-link:') ? link : `x-ukagaka-link:${link}`), 3000);
   }
 
   // ---------------------------------------------------------------- GhostEnv
@@ -369,6 +389,8 @@ export class GhostManager implements GhostEnv {
     const meta = ghost.meta;
     const shellName = ghost.shell.name;
     const script = await ghost.vanishOut();
+    // 消滅のスクリプトの途中で取りやめられた (OnVanishButtonHold)
+    if (script === undefined) return;
     try {
       await deletePackage(meta.key);
     } catch (e) {
@@ -389,27 +411,41 @@ export class GhostManager implements GhostEnv {
    * ネットワーク更新。ghost はゴースト全体、shell は今のシェル、balloon は今のバルーン。
    * 取り直したものがあれば読み直す
    */
-  async update(ghost: Ghost, opts: { targets: string[]; reason: string; checkOnly?: boolean }): Promise<void> {
+  async update(ghost: Ghost, opts: UpdateRequest): Promise<void> {
+    const summaries: UpdateSummary[] = [];
+    let restart = false;
     for (const raw of opts.targets) {
       const t = raw.trim().toLowerCase();
+      // --balloon=名前・--shell=名前 (\![updateother]) は、その名前のものを
+      const named = /^--(balloon|shell)=(.*)$/i.exec(raw.trim());
+      const kind = named ? named[1].toLowerCase() : t;
       let homeurl: string;
       let files: FileTree;
       let key = ghost.key;
       let prefix = '';
-      if (t === 'ghost') {
+      let name = ghost.name;
+      if (kind === 'ghost') {
         homeurl = ghost.descript.str('homeurl');
         files = ghost.files;
-      } else if (t === 'shell') {
-        prefix = `shell/${ghost.shell.dir}/`;
-        homeurl = ghost.shell.descript.str('homeurl') || ghost.descript.str('homeurl');
+      } else if (kind === 'shell') {
+        const dir = named ? ghost.shellDirs.find((d) => d === named[2].toLowerCase() || Shell.fromGhost(ghost.files, d).name === named[2]) : ghost.shell.dir;
+        if (!dir) continue;
+        const shell = Shell.fromGhost(ghost.files, dir);
+        prefix = `shell/${dir}/`;
+        name = shell.name;
+        homeurl = shell.descript.str('homeurl') || ghost.descript.str('homeurl');
         files = ghost.files.sub(prefix.slice(0, -1));
-      } else if (t === 'balloon' && ghost.skin.key) {
-        key = ghost.skin.key;
-        homeurl = ghost.skin.descript.str('homeurl');
+      } else if (kind === 'balloon') {
+        const meta = named ? this.packages.find((p) => p.kind === 'balloon' && p.name === named[2]) : this.packages.find((p) => p.key === ghost.skin.key);
+        if (!meta) continue;
+        key = meta.key;
+        name = meta.name;
         files = await readPackageFiles(key);
+        homeurl = Descript.read(files, 'descript.txt').str('homeurl');
       } else continue;
       if (!homeurl) {
-        this.toasts.show(`「${ghost.name}」の ${t} には更新の取得先 (homeurl) がありません`);
+        this.toasts.show(`「${name}」には更新の取得先 (homeurl) がありません`);
+        summaries.push({ name, target: kind, result: { ok: false, changed: [], reason: '404' } });
         continue;
       }
       const res = await networkUpdate(
@@ -418,22 +454,28 @@ export class GhostManager implements GhostEnv {
         {
           raise: (id, refs) => ghost.raise(id, refs, { wait: true }),
           write: (path, data) => writePackageFile(key, prefix + path, data),
+          remove: (paths) => deletePackageFiles(key, paths.map((p) => prefix + p)),
         },
-        { target: t, reason: opts.reason, checkOnly: opts.checkOnly, ghostName: ghost.name, path: ghost.key },
+        { target: kind, reason: opts.reason, checkOnly: opts.checkOnly, testOnly: opts.testOnly, recovery: opts.recovery, other: kind !== 'ghost', ghostName: ghost.name, path: ghost.key },
       );
+      summaries.push({ name, target: kind, result: res });
       if (!res.ok && res.reason === 'fetch') {
         this.toasts.show(`更新を取得できませんでした: ${homeurl} がブラウザからの取得を許していない (CORS) か、つながりません`, { error: true });
       }
-      if (res.ok && res.changed.length && !opts.checkOnly) {
-        if (t === 'balloon') {
+      if (res.ok && res.changed.length && !opts.checkOnly && !opts.testOnly) {
+        if (kind === 'balloon') {
           this.balloons.delete(key);
-          await ghost.changeBalloon(key, { force: true });
-        } else {
-          await this.restart(ghost, true);
-          return;
-        }
+          if (ghost.skin.key === key) await ghost.changeBalloon(key, { force: true });
+        } else restart = true;
       }
     }
+    // すべての結果のまとめ (OnUpdateResultEx、返事が無ければ OnUpdateResult。調べるだけのときは …CheckResult…)
+    if (summaries.length && ghost.alive && !ghost.leaving) {
+      const base = opts.checkOnly ? 'OnUpdateCheckResult' : 'OnUpdateResult';
+      const played = await ghost.raise(`${base}Ex`, updateResultRefs(summaries, true), { wait: true });
+      if (!played) await ghost.raise(base, updateResultRefs(summaries, false), { wait: true });
+    }
+    if (restart) await this.restart(ghost, true);
   }
 
   async reload(ghost: Ghost, what: string): Promise<void> {
@@ -488,6 +530,25 @@ export class GhostManager implements GhostEnv {
 
   toast(message: string): void {
     this.toasts.show(message);
+  }
+
+  /**
+   * x-ukagaka-link:type=event&ghost=名前&info=文字 を開く。そのゴースト (名前か本体側の名前) に OnXUkagakaLinkOpen を送る
+   * (SecurityLevel は external)。そのゴーストが起動していなければ何もしない
+   */
+  openUkagakaLink(link: string): boolean {
+    const m = /^x-ukagaka-link:(.*)$/i.exec(link.trim());
+    if (!m) return false;
+    const params = new URLSearchParams(m[1]);
+    if ((params.get('type') ?? 'event').toLowerCase() !== 'event') return false;
+    const name = params.get('ghost') ?? '';
+    const g = this.ghosts.find((x) => x.alive && !x.leaving && (x.name === name || x.sakuraName === name));
+    if (!g) {
+      this.toasts.show(`x-ukagaka-link の宛先「${name}」は起動していません`);
+      return false;
+    }
+    void g.raise('OnXUkagakaLinkOpen', [params.get('info') ?? ''], { headers: { SecurityLevel: 'external' }, kinds: ['remote'] });
+    return true;
   }
 
   /** SSTP を受ける相手 */
@@ -564,8 +625,49 @@ export class GhostManager implements GhostEnv {
     this.updateEmptyState();
   }
 
+  /** ゴーストキャッシュ (切り替えで離れたゴーストを、しばらく SHIORI ごと取っておく。新しい順) */
+  private readonly cached: Ghost[] = [];
+  private static readonly CACHE_SIZE = 2;
+
+  private putInCache(ghost: Ghost): void {
+    const i = this.ghosts.indexOf(ghost);
+    if (i >= 0) this.ghosts.splice(i, 1);
+    if (this.current === ghost) this.current = this.ghosts[0];
+    this.cached.unshift(ghost);
+    // 多すぎる分は本当に終わらせる
+    for (const old of this.cached.splice(GhostManager.CACHE_SIZE)) void old.destroy({ silent: true }).catch(() => undefined);
+    settings.running = this.ghosts.map((g) => g.key);
+    saveSettings();
+  }
+
+  /** キャッシュにあればそこから取り出す */
+  private takeFromCache(key: string): Ghost | undefined {
+    const i = this.cached.findIndex((g) => g.key === key && g.isSuspended);
+    return i >= 0 ? this.cached.splice(i, 1)[0] : undefined;
+  }
+
+  /** キャッシュにあるゴーストを終わらせる (削除・更新のとき) */
+  private dropFromCache(key: string): void {
+    for (const g of this.cached.filter((x) => x.key === key)) {
+      this.cached.splice(this.cached.indexOf(g), 1);
+      void g.destroy({ silent: true }).catch(() => undefined);
+    }
+  }
+
   async boot(meta: PackageMeta, mode: BootMode): Promise<Ghost | undefined> {
     if (this.isActive(meta.key)) return undefined;
+    const cached = mode.kind === 'changed' || mode.kind === 'called' || mode.kind === 'boot' ? this.takeFromCache(meta.key) : undefined;
+    if (cached) {
+      this.ghosts.push(cached);
+      this.current = cached;
+      addHistory('ghost', meta.key);
+      settings.running = this.ghosts.map((g) => g.key);
+      saveSettings();
+      await cached.resume(mode);
+      this.updateEmptyState();
+      return cached;
+    }
+    this.dropFromCache(meta.key);
     this.booting.add(meta.key);
     this.updateEmptyState();
     let ghost: Ghost | undefined;
@@ -602,9 +704,11 @@ export class GhostManager implements GhostEnv {
       const target = await this.identityOf(meta);
       const fromId = from.identity;
       const fromShell = from.shell.name;
-      const script = await from.leaveFor(target, raiseEvent);
+      const cache = settings.ghostCache !== false && !this.options.embedded;
+      const script = await from.leaveFor(target, raiseEvent, cache);
       this.booting.delete(meta.key);
       if (script === undefined) return;
+      if (from.isSuspended) this.putInCache(from);
       const booted = await this.boot(meta, { kind: 'changed', from: fromId, script, fromShell });
       // 切り替え先が起動できなかったら、前のゴーストは終わっただけなので、ほかのゴーストにそう知らせる
       if (!booted) this.announceClosed(fromId, from.lastScript, fromShell);
@@ -711,11 +815,22 @@ export class GhostManager implements GhostEnv {
     }
     await this.refreshPackages();
     for (const k of [result.key, ...result.balloons.map((b) => b.key)]) this.balloons.delete(k);
+    for (const item of result.installed) {
+      this.balloons.delete(item.key);
+      this.lastInstalledNames[item.type] = item.name;
+    }
     this.lastInstalledNames[result.type] = result.name;
-    for (const b of result.balloons) this.lastInstalledNames.balloon = b.name;
     this.updateEmptyState();
 
     const completeRefs = [result.type, result.installName, result.balloons[0]?.name ?? ''];
+    /** OnInstallCompleteEx (識別子・名前・場所をバイト値1区切りで。3つ以上でも全部)。返事が無ければ OnInstallComplete */
+    const complete = async (g: Ghost | undefined) => {
+      if (!g) return undefined;
+      const items = result.installed;
+      const ex = [items.map((i) => i.type).join('\x01'), items.map((i) => i.name).join('\x01'), items.map((i) => `/${i.key}/`).join('\x01')];
+      return (await g.raise('OnInstallCompleteEx', ex)) ?? (await g.raise('OnInstallComplete', completeRefs));
+    };
+    this.installedBatch.push(...result.installed);
     // 終わりかけのゴーストには知らせない (再起動も勧めない)
     const target = this.ghosts.find((g) => g.key === result.key && g.alive && !g.leaving);
     let played: string | undefined;
@@ -724,10 +839,10 @@ export class GhostManager implements GhostEnv {
       played = await ghost?.raise('OnInstallRefuse', [result.accept ?? '', result.type, result.installName]);
       if (target && target !== ghost) {
         void ghost?.raise('OnInstallReroute', [result.accept ?? '', result.type, result.installName]);
-        void target.raise('OnInstallComplete', completeRefs);
+        void complete(target);
       }
     } else {
-      played = await ghost?.raise('OnInstallComplete', completeRefs);
+      played = await complete(ghost);
     }
 
     const actions: { label: string; run(): void }[] = [];
@@ -805,10 +920,12 @@ export class GhostManager implements GhostEnv {
         await this.install(async () => (await filesFromFileList(files)).tree, folder);
       } else {
         // 「すべてのファイル」で選ばれた .nar / .zip 以外は、ドロップと同じく始めずに知らせる
+        this.installedBatch = [];
         for (const f of files) {
           if (ARCHIVE.test(f.name)) await this.install(async () => filesFromZip(new Uint8Array(await f.arrayBuffer())), f.name);
           else this.rejectNonArchive(f.name);
         }
+        this.completeBatch();
       }
     });
     input.click();
@@ -842,13 +959,34 @@ export class GhostManager implements GhostEnv {
     const dropped = fileItems.map((i) => i.getAsFile());
     const url = dt.getData('text/uri-list').split(/\r?\n/).find((l) => l && !l.startsWith('#'));
     const text = dt.getData('text/plain');
+    const types = [...dt.types];
+    // x-ukagaka-link: のリンクは、どこに落としても宛先のゴーストへ
+    const link = [url, text].find((v) => v && /^x-ukagaka-link:/i.test(v.trim()));
+    if (link) {
+      this.openUkagakaLink(link.trim());
+      return;
+    }
     if (!fileItems.length) {
       if (!at) return;
       if (url && /^https?:/i.test(url)) await at.ghost.dropUrl(at.scope, url);
       else if (text) await at.ghost.dropText(at.scope, text);
+      else if (types.length) await at.ghost.dropOther(at.scope, types);
       return;
     }
     if (at) {
+      // インストールできるもの (install.txt やゴースト・シェル・バルーンの形) ではないフォルダは、そのゴーストへ
+      const dirIndex = entries.findIndex((e) => e?.isDirectory);
+      if (dirIndex >= 0 && fileItems.length === 1) {
+        const entry = entries[dirIndex] as FileSystemDirectoryEntry;
+        const tree = await filesFromDirectoryEntry(entry);
+        const installable = tree.has('install.txt') || tree.list().some((p) => /(^|\/)(install\.txt|descript\.txt|surfaces\.txt|ghost\/master\/descript\.txt)$/i.test(p));
+        if (!installable) {
+          await at.ghost.dropDirectory(at.scope, entry.name, tree);
+          return;
+        }
+        await this.install(() => tree, entry.name);
+        return;
+      }
       const plain = dropped.filter((f): f is File => !!f && !ARCHIVE.test(f.name));
       const dirs = entries.some((e) => e?.isDirectory);
       if (plain.length && plain.length === fileItems.length && !dirs) {
@@ -861,6 +999,7 @@ export class GhostManager implements GhostEnv {
 
   /** ドロップされたもののうち、フォルダと .nar / .zip だけをインストールする (画像などは無視) */
   private async installDropped(entries: (FileSystemEntry | null)[], files: (File | null)[]): Promise<void> {
+    this.installedBatch = [];
     for (let i = 0; i < files.length; i++) {
       const entry = entries[i];
       const file = files[i];
@@ -869,7 +1008,20 @@ export class GhostManager implements GhostEnv {
       // それ以外 (画像など) はインストールを始めない
       else if (file) this.rejectNonArchive(file.name);
     }
+    this.completeBatch();
   }
+
+  /** いくつかを続けてインストールし終えた (OnInstallCompleteAll) */
+  private completeBatch(): void {
+    const items = this.installedBatch;
+    this.installedBatch = [];
+    const g = this.current?.alive && !this.current.leaving ? this.current : undefined;
+    if (!g || items.length < 2) return;
+    void g.raise('OnInstallCompleteAll', [items.map((i) => i.type).join('\x01'), items.map((i) => i.name).join('\x01'), items.map((i) => `/${i.key}/`).join('\x01')]);
+  }
+
+  /** 続けてインストールしたもの (OnInstallCompleteAll 用) */
+  private installedBatch: Installed[] = [];
 
   /** .nar / .zip でもフォルダでもないもの。インストールは始めず、ゴーストには知らせず、通知だけ出す */
   private rejectNonArchive(name: string): void {
@@ -982,6 +1134,7 @@ export class GhostManager implements GhostEnv {
           { label: 'スクリプトログ…', key: 'L', action: () => this.openTool(g, 'backlogviewer', []) },
           { label: 'エラーログ…', key: 'E', action: () => this.openTool(g, 'errorlog', []) },
           { label: 'SHIORI リクエスト…', key: 'R', action: () => this.openTool(g, 'shiorirequest', []) },
+          { label: 'スクリプトを送る…', key: 'I', action: () => this.openTool(g, 'sendbox', []) },
         ],
       });
       if (g.descript.str('homeurl')) {
@@ -1049,9 +1202,16 @@ export class GhostManager implements GhostEnv {
         userName: settings.userName,
         speech: settings.speech,
         acceptSstp: settings.acceptSstp,
+        voiceRecognition: settings.voiceRecognition ?? false,
       },
       {
+        help: (id) => {
+          const g = this.current?.alive ? this.current : undefined;
+          if (g) void g.raise('OnConfigurationDialogHelp', [id]);
+        },
         save: (m) => {
+          const speechChanged = m.speech !== settings.speech;
+          const voiceChanged = m.voiceRecognition !== (settings.voiceRecognition ?? false);
           const shell = m.scale !== settings.scale ? { before: settings.scale, after: m.scale } : undefined;
           const balloon = m.balloonScale !== settings.balloonScale ? { before: settings.balloonScale, after: m.balloonScale } : undefined;
           const user = m.userName !== settings.userName;
@@ -1060,6 +1220,8 @@ export class GhostManager implements GhostEnv {
             g.scalingChanged(shell, balloon);
             if (user) void g.notify('OnNotifyUserInfo', [m.userName, m.userName, '', 'undef']);
           }
+          if (speechChanged) this.environment.speechChanged();
+          if (voiceChanged) this.environment.setVoiceRecognition(m.voiceRecognition);
           if (!saveSettingsNow()) {
             this.toasts.show('設定を保存できませんでした: このブラウザの保存領域が使えません (このページを開いている間だけ有効です)', { error: true });
           }
@@ -1073,6 +1235,7 @@ export class GhostManager implements GhostEnv {
       this.packages.map((p) => ({ key: p.key, kind: p.kind, name: p.name, running: this.isActive(p.key) })),
       {
         uninstall: async (row) => {
+          this.dropFromCache(row.key);
           await deletePackage(row.key);
           delete settings.ghosts[row.key];
           settings.running = settings.running.filter((k) => k !== row.key);
@@ -1180,6 +1343,17 @@ export class GhostManager implements GhostEnv {
       ghosts: () => this.ghosts.map((g) => g.name),
       sstp: (request: string) => this.sstp(request, true),
     };
+    // x-ukagaka-link: のリンク (ページのリンクを押したとき・アドレスの ?x-ukagaka-link=… / #x-ukagaka-link:…)
+    document.addEventListener(
+      'click',
+      (e) => {
+        const a = e.target instanceof Element ? e.target.closest('a[href^="x-ukagaka-link:" i]') : null;
+        if (!a) return;
+        e.preventDefault();
+        this.openUkagakaLink(a.getAttribute('href') ?? '');
+      },
+      true,
+    );
     // よそのページ・フレームからの SSTP: postMessage({ type: 'sstp', request, id }) に { type: 'sstp-response', id, response } で答える
     window.addEventListener('message', (e: MessageEvent) => {
       const d = e.data as { type?: unknown; request?: unknown; id?: unknown } | null;

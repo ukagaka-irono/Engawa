@@ -19,9 +19,20 @@ export function button(label: string, kind: ButtonKind = 'secondary', onClick?: 
   return b;
 }
 
-export type PackageKindName = 'ghost' | 'balloon' | 'shell' | 'supplement';
+export type PackageKindName = 'ghost' | 'balloon' | 'shell' | 'supplement' | 'plugin' | 'headline' | 'calendar skin' | 'calendar plugin' | 'language' | 'package';
 
-const KIND_LABELS: Record<PackageKindName, string> = { ghost: 'ゴースト', balloon: 'バルーン', shell: 'シェル', supplement: '追加ファイル' };
+const KIND_LABELS: Record<PackageKindName, string> = {
+  ghost: 'ゴースト',
+  balloon: 'バルーン',
+  shell: 'シェル',
+  supplement: '追加ファイル',
+  plugin: 'プラグイン',
+  headline: 'ヘッドライン',
+  'calendar skin': 'カレンダースキン',
+  'calendar plugin': 'スケジュールセンサ',
+  language: '言語',
+  package: 'パッケージ',
+};
 
 /** パッケージの種類の表示名 (インストール結果と管理画面で共有) */
 export function packageKindLabel(kind: PackageKindName | string): string {
@@ -114,6 +125,8 @@ export interface InputOptions {
   placeholder?: string;
   /** 文字数の上限 (--limit) */
   limit?: number;
+  /** 入力の候補 (一行の入力欄だけ) */
+  suggestions?: string[];
   /** ms。0 以下で無期限 */
   timeout?: number;
   /** 閉じるボタンを出さない (--option=noclose) */
@@ -210,6 +223,11 @@ export class InputBox {
         if (opts.limit) input.maxLength = opts.limit;
         input.setAttribute('aria-labelledby', titleId);
         body.appendChild(input);
+        if (opts.suggestions?.length && type !== 'password') {
+          const list = el('datalist', { id: `${titleId}-list` }, ...opts.suggestions.map((s) => el('option', { value: s })));
+          input.setAttribute('list', list.id);
+          body.appendChild(list);
+        }
         read = () => input.value;
         first = input;
       }
@@ -408,6 +426,8 @@ export interface OptionsModel {
   speech: boolean;
   /** 他のゴーストが SSTP などで割り込むのを受ける */
   acceptSstp: boolean;
+  /** 音声認識で話しかける */
+  voiceRecognition: boolean;
 }
 
 /** 入力欄の範囲。保存時の丸めにも同じ値を使う */
@@ -418,7 +438,11 @@ const LIMITS = {
 };
 
 /** オプション (表示速度・拡大率など)。Enter で保存、範囲外はブラウザの検証で知らせる。 */
-export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): void }): void {
+/**
+ * on.help はページごとの「?」(SSP の設定ダイアログのヘルプ。ゴーストに OnConfigurationDialogHelp で知らせる)。
+ * ページの ID は SSP と同じもの (display・dictation・network・setup)
+ */
+export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): void; help?(id: string): void }): void {
   const { root, body, actions } = dialog('options-dialog', 'オプション', 'form');
   const form = root.querySelector('form')!;
 
@@ -450,7 +474,18 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
   const balloonScale = number(Math.round(model.balloonScale * 100), LIMITS.scale);
   const check = (checked: boolean) => el('input', { type: 'checkbox', className: 'check-input', checked });
   const speech = check(model.speech);
+  const voice = check(model.voiceRecognition);
   const sstp = check(model.acceptSstp);
+  /** 見出しと、そのページのヘルプ (?) */
+  const page = (title: string, id: string) => {
+    const h = section(title);
+    if (on.help) {
+      const q = button('?', 'icon', () => on.help!(id), { ariaLabel: `「${title}」のヘルプをゴーストに聞く` });
+      q.classList.add('section-help');
+      h.appendChild(q);
+    }
+    return h;
+  };
   // 空白だけの呼び名もブラウザの検証で止める (黙って前の名前に戻さない)
   const user = el('input', {
     className: 'text-input',
@@ -463,16 +498,18 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
   });
 
   body.append(
-    section('表示'),
+    page('表示', 'display'),
     field('文字の表示間隔 (ms)', talkWait),
     field('バルーンのタイムアウト (秒)', balloon, '0 で無効'),
     field('選択肢のタイムアウト (秒)', choice, '0 で無効'),
     field('シェルの拡大率 (%)', scale),
     field('バルーンの拡大率 (%)', balloonScale),
+    page('音声合成・認識', 'dictation'),
     field('喋った言葉を読み上げる', speech, 'ブラウザの音声合成を使います (\\__v[disable] の所は読みません)'),
-    section('連携'),
+    field('声で話しかける', voice, 'ブラウザの音声認識を使います (Chrome など。マイクの許可が要ります)'),
+    page('連携', 'network'),
     field('よそのページからの SSTP を受ける', sstp, 'ほかのページやアプリが postMessage で送る SSTP を、ゴーストに渡します'),
-    section('ユーザー'),
+    page('ユーザー', 'setup'),
     field('呼び名', user, 'ゴーストがあなたの呼び名を知らないときに使います'),
   );
 
@@ -489,6 +526,7 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
       userName: user.value.trim() || model.userName,
       speech: speech.checked,
       acceptSstp: sstp.checked,
+      voiceRecognition: voice.checked,
     };
     // 先に閉じてから保存する (保存の結果はダイアログの外の通知で知らせるため)
     root.close();
@@ -592,14 +630,22 @@ export function showHelp(markdown: string): void {
 }
 
 /** 読むだけの文 (readme・terms・ログなど)。pre なら等幅のまま */
-export function showText(title: string, text: string, opts: { pre?: boolean; actions?: { label: string; run(): void }[] } = {}): void {
+/** actions は押したらダイアログを閉じてから run する (利用条件の受諾・拒否など) */
+export function showText(title: string, text: string, opts: { pre?: boolean; actions?: { label: string; run(): void }[]; closeLabel?: string } = {}): void {
   const { root, body, actions, titleId } = dialog('help-dialog', title);
   body.appendChild(opts.pre === false ? el('div', { className: 'plain-text' }, text) : el('pre', { className: 'license-text' }, text));
   body.tabIndex = 0;
   body.setAttribute('role', 'document');
   body.setAttribute('aria-labelledby', titleId);
-  for (const a of opts.actions ?? []) actions.appendChild(button(a.label, 'secondary', a.run));
-  const close = button('閉じる', 'primary', () => root.close());
+  for (const a of opts.actions ?? []) {
+    actions.appendChild(
+      button(a.label, 'secondary', () => {
+        root.close();
+        a.run();
+      }),
+    );
+  }
+  const close = button(opts.closeLabel ?? '閉じる', 'primary', () => root.close());
   actions.appendChild(close);
   root.showModal();
   body.scrollTop = 0;

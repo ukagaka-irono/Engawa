@@ -1,5 +1,6 @@
 /** ベースウェアの設定。ブラウザの localStorage に保存する (使えない環境では保存しない)。 */
 import { clone } from '../util/clone';
+import type { CalEvent } from './ical';
 
 export interface CharacterPosition {
   right: number;
@@ -38,8 +39,14 @@ export interface Settings {
   speech: boolean;
   /** よそのページからの SSTP (postMessage) を受ける */
   acceptSstp: boolean;
+  /** 音声認識で話しかける (OnVoiceRecognitionWord) */
+  voiceRecognition?: boolean;
+  /** ゴーストキャッシュ (切り替えたゴーストをしばらく取っておき、戻るときに速く起こす)。既定は使う */
+  ghostCache?: boolean;
   running: string[];
   ghosts: Record<string, GhostState>;
+  /** ゴースト用の予定表 (\![execute,schedule-add] など。すべてのゴーストで共有) */
+  schedule?: CalEvent[];
   /** 最近使ったもの (パッケージのキー、新しい順) */
   history?: { ghost: string[]; balloon: string[] };
 }

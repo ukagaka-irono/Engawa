@@ -28,6 +28,7 @@ export interface BalloonInfo {
   rect: { left: number; top: number; width: number; height: number };
   valid: { width: number; height: number };
   basepos: { x: number; y: number };
+  vertical: boolean;
   lineHeight: number;
   charWidth: number;
   scaling: number;
@@ -293,7 +294,7 @@ function balloonProperty(p: string, h: PropertyHost): string | undefined {
     case 'scaling':
       return String(Math.round(b.scaling * 10000) / 100);
     case 'vertical':
-      return '0';
+      return b.vertical ? '1' : '0';
     case 'background.color':
       return '255,255,255';
   }
@@ -416,8 +417,6 @@ export function readProperty(path: string, h: PropertyHost): string {
     'currentghost.balloon.count': 1,
     'currentghost.seriko.sticky-window': h.sticky,
     'currentghost.seriko.zorder': h.zorder,
-    'headlinelist.count': 0,
-    'pluginlist.count': 0,
     'history.ghost.count': (settings.history?.ghost ?? []).length,
     'history.balloon.count': (settings.history?.balloon ?? []).length,
     'history.headline.count': 0,
@@ -456,6 +455,12 @@ export function readProperty(path: string, h: PropertyHost): string {
     return generic(f, { ...s, descript: d }, i);
   });
   if (shell !== undefined) return shell;
+  // ヘッドライン・プラグイン (保存してあるだけで動かないが、一覧は答える)
+  for (const kind of ['headline', 'plugin'] as const) {
+    const items = h.installed.filter((m) => m.kind === kind).map((m) => ({ name: m.name, path: m.key }));
+    const v = listProperty(p, `${kind}list`, items, -1, (e, i, f) => generic(f, e, i));
+    if (v !== undefined) return v;
+  }
   const bl = listProperty(
     p,
     'balloonlist',

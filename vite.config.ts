@@ -57,5 +57,6 @@ export default defineConfig({
   },
   // SHIORI の Worker も ES モジュールではなく普通のスクリプトにする (Blob から起動する)
   worker: { format: 'iife' },
-  test: { environment: 'node' },
+  // native/ の下に取ってきた SHIORI のリポジトリにも試験があるので、Engawa の test/ だけを動かす
+  test: { environment: 'node', include: ['test/**/*.test.ts'] },
 });

@@ -1,6 +1,7 @@
 import BUDOUX_WASM from '../assets/saori/budoux.wasm.gz?url';
 import CALCS_WASM from '../assets/saori/calcs.wasm.gz?url';
 import GENGOU_WASM from '../assets/saori/gengou.wasm.gz?url';
+import KISARAGI_WASM from '../assets/saori/kisaragi.wasm.gz?url';
 import MAHJONGUTIL_WASM from '../assets/saori/mahjongutil.wasm.gz?url';
 import NODOKA_WASM from '../assets/saori/nodoka.wasm.gz?url';
 import PIECHART_WASM from '../assets/saori/piechart.wasm.gz?url';
@@ -8,10 +9,13 @@ import QRCODE_WASM from '../assets/saori/qrcode.wasm.gz?url';
 import RESIZEDPNG_WASM from '../assets/saori/resizedpng.wasm.gz?url';
 import RESIZEDPNGMINI_WASM from '../assets/saori/resizedpngmini.wasm.gz?url';
 import SQLORI_WASM from '../assets/saori/sqlori.wasm.gz?url';
+import SQLORI2_WASM from '../assets/saori/sqlori2.wasm.gz?url';
 import SSU_WASM from '../assets/saori/ssu.wasm.gz?url';
 import TEXASHOLDEM_WASM from '../assets/saori/texasholdem.wasm.gz?url';
 import TIMEBKN_WASM from '../assets/saori/timebkn.wasm.gz?url';
 import XAORIC_WASM from '../assets/saori/xaoric.wasm.gz?url';
+import KAWARI_WASM from '../assets/shiori/kawari.wasm.gz?url';
+import SATORI_WASM from '../assets/shiori/satori.wasm.gz?url';
 import YAYA_WASM from '../assets/shiori/yaya.wasm.gz?url';
 import type { FileTree } from '../vfs/files';
 import { detectSaori, isWasmSaori, type WasmSaoriKind } from './detect';
@@ -34,6 +38,10 @@ const WASM_URLS: Record<WasmSaoriKind, string> = {
   piechart: PIECHART_WASM,
   ssu: SSU_WASM,
   yaya: YAYA_WASM,
+  satori: SATORI_WASM,
+  kawari: KAWARI_WASM,
+  kisaragi: KISARAGI_WASM,
+  sqlori2: SQLORI2_WASM,
 };
 
 /**

@@ -180,9 +180,23 @@ export class BalloonSkin {
     return `rgb(${r}, ${g}, ${b})`;
   }
 
+  /** 縦書きのバルーン (descript の vertical,1) */
+  vertical(kind: BalloonKind, id: number, rightSide: boolean): boolean {
+    return this.value(kind, id, rightSide, 'vertical')?.trim() === '1';
+  }
+
   textRect(kind: BalloonKind, id: number, rightSide: boolean, width: number, height: number): TextRect {
     if (this.isBuiltin) return { left: 16, top: 14, right: width - 16, bottom: height - 14 };
     const num = (name: string) => this.num(kind, id, rightSide, name);
+    // 縦書きでは origin.x が1列目の右端、折り返しは wordwrappoint.y
+    if (this.vertical(kind, id, rightSide)) {
+      return {
+        left: edge(num('validrect.left'), width, 10),
+        top: edge(num('origin.y') ?? num('validrect.top'), height, 10),
+        right: edge(num('origin.x') ?? num('validrect.right'), width, -10),
+        bottom: edge(num('wordwrappoint.y') ?? num('validrect.bottom'), height, -10),
+      };
+    }
     return {
       left: edge(num('origin.x') ?? num('validrect.left'), width, 10),
       top: edge(num('origin.y') ?? num('validrect.top'), height, 10),

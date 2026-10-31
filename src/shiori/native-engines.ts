@@ -9,11 +9,12 @@ import createKawari from '../assets/shiori/kawari.mjs';
 import createKawari7 from '../assets/shiori/kawari7.mjs';
 import createMinato from '../assets/shiori/minato.mjs';
 import createNashi from '../assets/shiori/nashi.mjs';
+import createPasta from '../assets/shiori/pasta.mjs';
 import createQuickshiori from '../assets/shiori/quickshiori.mjs';
 import createSatori from '../assets/shiori/satori.mjs';
 import createYaya from '../assets/shiori/yaya.mjs';
 
-export type EngineId = 'yaya' | 'aya5' | 'satori' | 'kawari' | 'kawari7' | 'nashi' | 'minato' | 'kagari' | 'quickshiori';
+export type EngineId = 'yaya' | 'aya5' | 'satori' | 'kawari' | 'kawari7' | 'nashi' | 'minato' | 'pasta' | 'kagari' | 'quickshiori';
 
 /** Emscripten のメモリ上のファイルシステム (使うものだけ) */
 export interface EmscriptenFS {
@@ -60,6 +61,7 @@ export const ENGINES: Record<EngineId, EngineFactory> = {
   kawari7: createKawari7,
   nashi: createNashi,
   minato: createMinato,
+  pasta: createPasta,
   kagari: createKagari,
   quickshiori: createQuickshiori,
 };

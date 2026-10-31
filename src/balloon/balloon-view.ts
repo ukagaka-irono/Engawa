@@ -191,8 +191,14 @@ export class BalloonView {
   }
 
   /** 今の画像に効くフォントやカーソルの設定を CSS 変数に移す */
+  /** 縦書き (右から左へ行が進む) */
+  get vertical(): boolean {
+    return this.el.classList.contains('vertical');
+  }
+
   private applyStyle(): void {
     const st = this.skin.style(this.kind, this.balloonId, this.rightSide);
+    this.el.classList.toggle('vertical', this.skin.vertical(this.kind, this.balloonId, this.rightSide));
     const s = this.el.style;
     s.setProperty('--b-font', st.fontFamily);
     s.setProperty('--b-size', `${st.fontSize}px`);
@@ -547,7 +553,11 @@ export class BalloonView {
   }
 
   private scrollToEnd(): void {
-    if (this.autoScroll && !this.repaintLocked) this.text.scrollTop = this.text.scrollHeight;
+    // 縦書きでは左へ進むので、左の端 (scrollLeft の負の向き) へ
+    if (this.autoScroll && !this.repaintLocked) {
+      if (this.vertical) this.text.scrollLeft = -this.text.scrollWidth;
+      else this.text.scrollTop = this.text.scrollHeight;
+    }
     this.updateArrows();
   }
 
@@ -597,8 +607,9 @@ export class BalloonView {
       this.decor.appendChild(el);
     };
     const t = this.text;
-    const canUp = t.scrollTop > 0;
-    const canDown = t.scrollTop + t.clientHeight < t.scrollHeight - 1;
+    // 縦書きでは arrow0 が右 (戻る向き)、arrow1 が左 (進む向き)
+    const canUp = this.vertical ? t.scrollLeft < 0 : t.scrollTop > 0;
+    const canDown = this.vertical ? -t.scrollLeft + t.clientWidth < t.scrollWidth - 1 : t.scrollTop + t.clientHeight < t.scrollHeight - 1;
     if (canUp) put(this.skin.partImage(this.kind, 'arrow.filename', 'arrow', '0'), point('arrow0'), 'balloon-arrow', { text: '▲', x: w - 22, y: 2 });
     if (canDown) put(this.skin.partImage(this.kind, 'arrow.filename', 'arrow', '1'), point('arrow1'), 'balloon-arrow', { text: '▼', x: w - 22, y: h - 20 });
     if (this.waitingClick && !(canDown && !point('clickwaitmarker'))) {
@@ -669,6 +680,50 @@ export class BalloonView {
     t.width = `${Math.max(0, r.right - r.left)}px`;
     t.height = `${Math.max(0, r.bottom - r.top)}px`;
     this.drawDecor();
+  }
+
+  /**
+   * いまの描画を PNG にする (\![execute,dumpballoon])。背景の画像に、文字を行・まとまりごとに描く。
+   * hide に balloonmarker・balloonnum があれば、それを描かない
+   */
+  async snapshot(hide: string[] = []): Promise<Blob | null> {
+    const [w, h] = this.skin.size(this.kind, this.balloonId, this.rightSide);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    if (!this.bg.hidden) ctx.drawImage(this.bg, 0, 0);
+    else {
+      ctx.fillStyle = getComputedStyle(this.inner).backgroundColor || '#fff';
+      ctx.fillRect(0, 0, w, h);
+    }
+    const box = this.inner.getBoundingClientRect();
+    const k = box.width ? w / box.width : 1;
+    const draw = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      if (el instanceof HTMLImageElement || el instanceof HTMLCanvasElement) {
+        ctx.drawImage(el, (r.left - box.left) * k, (r.top - box.top) * k, r.width * k, r.height * k);
+        return;
+      }
+      const text = el.childNodes.length === 1 && el.firstChild?.nodeType === Node.TEXT_NODE ? el.textContent : null;
+      if (text) {
+        const cs = getComputedStyle(el);
+        ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${parseFloat(cs.fontSize) * k}px ${cs.fontFamily}`;
+        ctx.fillStyle = cs.color;
+        ctx.textBaseline = 'top';
+        ctx.fillText(text, (r.left - box.left) * k, (r.top - box.top) * k, r.width * k + 2);
+        return;
+      }
+      for (const child of el.children) draw(child);
+    };
+    for (const child of this.text.children) draw(child);
+    for (const child of this.decor.children) {
+      if (hide.includes('balloonmarker') && /balloon-sstp/.test(child.className)) continue;
+      if (hide.includes('balloonnum') && child.classList.contains('balloon-number')) continue;
+      draw(child);
+    }
+    return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   }
 
   setScale(scale: number): void {

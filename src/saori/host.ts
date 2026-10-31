@@ -1,4 +1,5 @@
 import type { EmscriptenFS } from '../shiori/native-engines';
+import { builtinSaori } from './detect';
 import { buildSaoriResponse, matchResponseCharset, parseSaoriRequest, type SaoriRequest, type SaoriResult } from './protocol';
 
 /**
@@ -120,7 +121,8 @@ export class SaoriHost {
   readonly bridge: SaoriBridge = {
     open: (pathBytes) => {
       const asked = normalizePath(decodePath(pathBytes), this.cwd);
-      const path = findFile(this.fs, asked);
+      // ninix-saori はゴーストが同梱しない (ベースウェアの側にある) ので、無くてもその名前なら開く
+      const path = findFile(this.fs, asked) ?? (builtinSaori(asked) ? asked : undefined);
       if (!path) {
         this.log(`SAORI: ${asked} が見つかりません`);
         return 0;
@@ -132,7 +134,7 @@ export class SaoriHost {
       }
       let module = this.made.get(path);
       if (!module) {
-        module = this.guard(path, () => this.resolve(path, this.fs.readFile(path)), undefined);
+        module = this.guard(path, () => this.resolve(path, this.fs.analyzePath(path).exists ? this.fs.readFile(path) : new Uint8Array(0)), undefined);
         if (!module) {
           this.log(`SAORI: ${path} はブラウザでは使えません`);
           return 0;

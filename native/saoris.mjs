@@ -179,6 +179,84 @@ export const SAORIS = [
   },
   {
     ...CSAORI,
+    // SQLite 2.8 で組んだ古い sqlori (sqlori-sqlite2)。データベースのファイルが SQLite 3 と違うので、別に組む
+    name: 'sqlori2',
+    label: 'sqlori (SQLite 2)',
+    licenses: [
+      { title: 'sqlori-sqlite2 (readme.txt より。だれでも自由に使い、変えてよい)', file: 'impl_saori/sqlori_sqlite2/readme.txt', to: '1. Update' },
+      { title: 'SQLite 2 (Public Domain)', file: 'impl_saori/sqlori_sqlite2/sqlite2/sqlite.h', from: '** The author disclaims copyright', to: '*****' },
+    ],
+    headerDirs: ['.', 'impl_saori/sqlori_sqlite2'],
+    includes: ['.', 'impl_saori/sqlori_sqlite2/sqlite2'],
+    defines: ['OS_UNIX=1', 'OS_WIN=0', 'OS_MAC=0', 'NO_TCL=1', 'THREADSAFE=0'],
+    edits: {
+      // パーサーの宣言の戻り値の型が定義 (parse.c の void) と違う (wasm では呼んだところで止まる)
+      'impl_saori/sqlori_sqlite2/sqlite2/tokenize.c': [['  extern int sqliteParser(void*, int, Token, Parse*);', '  extern void sqliteParser(void*, int, Token, Parse*);']],
+    },
+    sources: [
+      ...CSAORI_BASE,
+      'impl_saori/sqlori_sqlite2/csaori_interface.cpp',
+      'impl_saori/sqlori_sqlite2/sqlori.cpp',
+      ...['attach', 'auth', 'btree', 'btree_rb', 'build', 'copy', 'date', 'delete', 'encode', 'expr', 'func', 'hash', 'insert', 'main', 'opcodes', 'os', 'pager', 'parse', 'pragma', 'printf', 'random', 'select', 'table', 'tokenize', 'trigger', 'update', 'util', 'vacuum', 'vdbe', 'vdbeaux', 'where'].map((n) => `impl_saori/sqlori_sqlite2/sqlite2/${n}.c`),
+    ],
+  },
+  {
+    ...CSAORI,
+    // MeCab で形態素解析をする (kisaragi.dll)。MeCab の本体 (libmecab.dll) はリポジトリに無いので taku910/mecab から組む。
+    // 辞書 (dic/) はゴーストが DLL と一緒に置く
+    name: 'kisaragi',
+    label: 'kisaragi (MeCab)',
+    deps: [{ name: 'mecab', repo: 'https://github.com/taku910/mecab.git', commit: '61b90ba6e669dc2d7d533d4a80d206f3b31d52b1' }],
+    licenses: [csaoriLicense('kisaragi', 'kisaragi'), { title: 'MeCab (BSD)', file: '@mecab/mecab/BSD' }],
+    headerDirs: ['.', 'impl_saori/kisaragi'],
+    includes: ['.', '@mecab/mecab/src'],
+    defines: ['CUSTOM_CREATE_INSTANCE', 'VERSION="0.996"', 'PACKAGE="mecab"', 'DIC_VERSION=102', 'MECAB_DEFAULT_RC="/dev/null"', 'HAVE_UNISTD_H', 'HAVE_FCNTL_H', 'HAVE_SYS_STAT_H', 'HAVE_SYS_TYPES_H', 'HAVE_SYS_MMAN_H', 'HAVE_MMAP', 'HAVE_STRING_H', 'HAVE_STDINT_H', 'HAVE_DIRENT_H', 'HAVE_GETENV'],
+    edits: {
+      // MeCab は DLL ではなく一緒に組む。一時ファイル・環境変数は POSIX のもので書く。辞書のパスの \ は / にする
+      'impl_saori/kisaragi/kisaragi.cpp': [
+        ['#include "mecab/sdk/mecab.h"', '#include "mecab.h"\n#include <algorithm>\n#include <cstdio>'],
+        ['m_dicDir(L"dic\\\\")', 'm_dicDir(L"dic/")'],
+        ['\tm_hMeCabDLL = ::LoadLibrary(dll_path.c_str());', '\tm_hMeCabDLL = NULL;\n\t(void)dll_path;'],
+        ['\t\t::FreeLibrary(m_hMeCabDLL);', '\t\tm_hMeCabDLL = NULL;'],
+        [
+          '\tstring_t fullPath = checkAndModifyPathW(m_dicDir);\n',
+          "\tstring_t fullPath = checkAndModifyPathW(m_dicDir);\n\tstd::replace(fullPath.begin(), fullPath.end(), L'\\\\', L'/');\n",
+        ],
+        [
+          '\tchar tempPath[MAX_PATH];\n\t::GetTempPath(MAX_PATH,tempPath);\n\n\tchar tempFile[MAX_PATH];\n\t::GetTempFileName(tempPath,"KSG",0,tempFile);',
+          '\tconst char *tempFile = "/tmp/kisaragi_mecabrc";',
+        ],
+        [
+          '\tchar oldMecabRC[MAX_PATH] = "";\n\t::GetEnvironmentVariable("MECABRC",oldMecabRC,sizeof(oldMecabRC));\n\t::SetEnvironmentVariable("MECABRC",tempFile);',
+          '\tsetenv("MECABRC",tempFile,1);',
+        ],
+        [
+          '\t\tfullPath = checkAndModifyPathW(m_userDic);\n',
+          "\t\tfullPath = checkAndModifyPathW(m_userDic);\n\t\tstd::replace(fullPath.begin(), fullPath.end(), L'\\\\', L'/');\n",
+        ],
+        [
+          '\tHANDLE h = ::CreateFile(tempFile,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL|FILE_ATTRIBUTE_TEMPORARY,NULL);',
+          '\tFILE *h = fopen(tempFile,"wb");',
+        ],
+        [
+          '\tDWORD written = 0;\n\t::WriteFile(h,buffer.c_str(),buffer.size(),&written,NULL);\n\t::CloseHandle(h);',
+          '\tif ( h ) { fwrite(buffer.c_str(),1,buffer.size(),h); fclose(h); }',
+        ],
+        ['\t::DeleteFile(tempFile);\n\t::SetEnvironmentVariable("MECABRC",oldMecabRC);', '\tremove(tempFile);\n\tunsetenv("MECABRC");'],
+      ],
+      // Windows 向けの辞書の dicrc は改行が CRLF (Windows の MeCab はテキストモードで読むので \r が消える)
+      '@mecab/mecab/src/param.cpp': [
+        ['  while (std::getline(ifs, line)) {\n', "  while (std::getline(ifs, line)) {\n    if (line.size() && line[line.size() - 1] == '\\r') line.erase(line.size() - 1);\n"],
+      ],
+    },
+    sources: [
+      ...CSAORI_BASE,
+      'impl_saori/kisaragi/kisaragi.cpp',
+      ...['char_property', 'connector', 'context_id', 'dictionary', 'dictionary_compiler', 'dictionary_generator', 'dictionary_rewriter', 'eval', 'feature_index', 'iconv_utils', 'lbfgs', 'learner', 'learner_tagger', 'libmecab', 'nbest_generator', 'param', 'string_buffer', 'tagger', 'tokenizer', 'utils', 'viterbi', 'writer'].map((n) => ({ file: `@mecab/mecab/src/${n}.cpp`, encoding: 'utf-8' })),
+    ],
+  },
+  {
+    ...CSAORI,
     // 麻雀の向聴数・待ち・点数。CSaori を同梱した別のリポジトリで、ソースは UTF-8
     name: 'mahjongutil',
     label: 'MahjongUtil',

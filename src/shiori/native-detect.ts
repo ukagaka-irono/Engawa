@@ -8,6 +8,7 @@ import KAWARI_WASM from '../assets/shiori/kawari.wasm.gz?url';
 import KAWARI7_WASM from '../assets/shiori/kawari7.wasm.gz?url';
 import MINATO_WASM from '../assets/shiori/minato.wasm.gz?url';
 import NASHI_WASM from '../assets/shiori/nashi.wasm.gz?url';
+import PASTA_WASM from '../assets/shiori/pasta.wasm.gz?url';
 import QUICKSHIORI_WASM from '../assets/shiori/quickshiori.wasm.gz?url';
 import SATORI_WASM from '../assets/shiori/satori.wasm.gz?url';
 import YAYA_WASM from '../assets/shiori/yaya.wasm.gz?url';
@@ -43,6 +44,8 @@ const RULES: Rule[] = [
   { id: 'nashi', label: 'なし栞', wasmUrl: NASHI_WASM, signatures: ['Sender: nashi'], dllNames: ['nashi.dll'], markers: ['ghost.json'] },
   // minato は shiori.dll に名前を変えて同梱されるので、最初に読む台本の名前 (main.mnt) で見分ける
   { id: 'minato', label: 'minato', wasmUrl: MINATO_WASM, signatures: ['main.mnt'], dllNames: ['minato.dll'], markers: ['talks/main.mnt'] },
+  // pasta (Rust と Lua) は pasta.toml を読む。中に Lua の台本 (main.lua など) を持つので、kagari より先に調べる
+  { id: 'pasta', label: 'pasta', wasmUrl: PASTA_WASM, signatures: ['pasta.toml'], dllNames: ['pasta.dll'], markers: ['pasta.toml'] },
   // kagari (Lua 5.4) は index.lua を読む。kotori のゴーストには kagari.conf.lua がある
   { id: 'kagari', label: 'kagari', wasmUrl: KAGARI_WASM, signatures: ['index.lua'], dllNames: ['kagari.dll'], markers: ['kagari.conf.lua'] },
   // quickshiori (QuickJS) は index.js の globalThis.__shiori_request を呼ぶ

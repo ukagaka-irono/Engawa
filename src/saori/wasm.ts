@@ -2,6 +2,7 @@ import { gunzipSync } from 'fflate';
 import createBudoux from '../assets/saori/budoux.mjs';
 import createCalcs from '../assets/saori/calcs.mjs';
 import createGengou from '../assets/saori/gengou.mjs';
+import createKisaragi from '../assets/saori/kisaragi.mjs';
 import createMahjongutil from '../assets/saori/mahjongutil.mjs';
 import createNodoka from '../assets/saori/nodoka.mjs';
 import createPiechart from '../assets/saori/piechart.mjs';
@@ -9,10 +10,13 @@ import createQrcode from '../assets/saori/qrcode.mjs';
 import createResizedpng from '../assets/saori/resizedpng.mjs';
 import createResizedpngmini from '../assets/saori/resizedpngmini.mjs';
 import createSqlori from '../assets/saori/sqlori.mjs';
+import createSqlori2 from '../assets/saori/sqlori2.mjs';
 import createSsu from '../assets/saori/ssu.mjs';
 import createTexasholdem from '../assets/saori/texasholdem.mjs';
 import createTimebkn from '../assets/saori/timebkn.mjs';
 import createXaoric from '../assets/saori/xaoric.mjs';
+import createKawari from '../assets/shiori/kawari.mjs';
+import createSatori from '../assets/shiori/satori.mjs';
 import createYaya from '../assets/shiori/yaya.mjs';
 import { callLoad, callRequest, mkdirs, walk } from '../shiori/native-call';
 import type { EmscriptenFS, EngineFactory } from '../shiori/native-engines';
@@ -53,6 +57,12 @@ export const WASM_SAORI: Record<WasmSaoriKind, WasmSaori> = {
   ssu: { create: createSsu, pathCharset: 'utf-8' },
   // SAORI として使う YAYA。SHIORI の YAYA と同じもので、DLL のディレクトリの yaya.txt を読み、変数を書く
   yaya: { create: createYaya, pathCharset: 'utf-8', writes: true },
+  // ninix-saori の saori_satori・saori_kawari。SHIORI の里々・華和梨に SAORI の要求をそのまま渡す
+  satori: { create: createSatori, pathCharset: 'utf-8', writes: true },
+  kawari: { create: createKawari, pathCharset: 'utf-8', writes: true },
+  // MeCab の辞書 (dic/) は DLL のディレクトリから読む
+  kisaragi: { create: createKisaragi, pathCharset: 'shift_jis' },
+  sqlori2: { create: createSqlori2, pathCharset: 'shift_jis', writes: true },
 };
 
 /** メインスレッドが送ってくる、ゴーストにある WebAssembly の SAORI */

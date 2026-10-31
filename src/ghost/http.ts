@@ -24,6 +24,10 @@ export interface HttpRequest {
   contentType: string;
   headers: [string, string][];
   timeout: number;
+  /** --progress-notify: 取っている途中を OnExecuteHTTPProgress で知らせる */
+  progress: boolean;
+  /** --streaming: 届いた分を OnExecuteHTTPStreaming で知らせる */
+  streaming: boolean;
 }
 
 export function parseHttp(sub: string, args: string[]): HttpRequest | undefined {
@@ -41,6 +45,8 @@ export function parseHttp(sub: string, args: string[]): HttpRequest | undefined 
     contentType: 'application/x-www-form-urlencoded',
     headers: [],
     timeout: 60,
+    progress: false,
+    streaming: false,
   };
   let explicit = false;
   for (const raw of args.slice(1)) {
@@ -71,6 +77,8 @@ export function parseHttp(sub: string, args: string[]): HttpRequest | undefined 
     else if (key === 'cookie') req.headers.push(['Cookie', value]);
     else if (key === 'no-cache') req.headers.push(['Cache-Control', 'no-cache']);
     else if (key === 'timeout') req.timeout = Math.min(300, Math.max(1, Number(value) || 60));
+    else if (key === 'progress-notify') req.progress = true;
+    else if (key === 'streaming') req.streaming = true;
   }
   if (!explicit) req.sync = true;
   return req;
@@ -115,17 +123,39 @@ function body(req: HttpRequest): { body?: BodyInit; query?: string } {
   return { body: encodeCharset(text, req.paramCharset) as BodyInit };
 }
 
-export async function runHttp(req: HttpRequest): Promise<HttpResult> {
+/** signal で取り消せる (\![cancel,http,URL]) */
+export async function runHttp(req: HttpRequest, signal?: AbortSignal, onChunk?: (chunk: Uint8Array, received: number, total: number) => void): Promise<HttpResult> {
   const { body: data, query } = body(req);
   const url = query ? `${req.url}${req.url.includes('?') ? '&' : '?'}${query}` : req.url;
   const headers = new Headers(req.headers);
   if (data && !(data instanceof FormData)) headers.set('Content-Type', req.contentType);
   const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
   const timer = window.setTimeout(() => controller?.abort(), req.timeout * 1000);
+  signal?.addEventListener('abort', () => controller?.abort());
   try {
     const method = req.method === 'get' && req.rss ? 'GET' : req.method.toUpperCase();
     const res = await fetch(url, { method, headers, body: data, signal: controller?.signal });
-    const bytes = new Uint8Array(await res.arrayBuffer());
+    let bytes: Uint8Array;
+    const reader = onChunk ? res.body?.getReader() : undefined;
+    if (reader) {
+      // 届いた分ずつ知らせる (--progress-notify・--streaming)
+      const total = Number(res.headers.get('Content-Length')) || -1;
+      const parts: Uint8Array[] = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+        received += value.length;
+        onChunk!(value, received, total);
+      }
+      bytes = new Uint8Array(received);
+      let at = 0;
+      for (const p of parts) {
+        bytes.set(p, at);
+        at += p.length;
+      }
+    } else bytes = new Uint8Array(await res.arrayBuffer());
     const head: string[] = [];
     res.headers.forEach((v, k) => head.push(`${k}: ${v}`));
     return { ok: res.ok, code: String(res.status), data: bytes, headers: head.join('\x01') };

@@ -9,7 +9,9 @@ export type SaoriEffect =
   /** path はパッケージのルートからの相対 (ghost/master/…)。data はファイルの中身 (SHIORI のファイルシステムにあれば) */
   | { kind: 'sound'; path: string; data?: Uint8Array }
   /** SAORI がファイルを書いた (画像を作ったなど)。すぐに表示に使えるよう、セーブデータと同じく書き戻す */
-  | { kind: 'write'; path: string; data: Uint8Array };
+  | { kind: 'write'; path: string; data: Uint8Array }
+  /** 音声合成で読む (AquesTalk の代わり)。stop なら止める。rate は速さの倍率 */
+  | { kind: 'speak'; text: string; rate?: number; stop?: boolean };
 
 /** SAORI が知りたい、ブラウザとページの様子。メインスレッドが読み込みのとき (と変わったとき) に送る */
 export interface SaoriEnv {

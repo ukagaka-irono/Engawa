@@ -14,12 +14,14 @@ import { Shell } from '../shell/shell';
 import { closeSystemDialogs, download, hideTooltip, openSystemDialog, showTooltip } from '../ui/ghost-ui';
 import { copyText } from '../util/clipboard';
 import { loadTransparentImage } from '../util/image';
+import { AudioTap } from '../util/audio-tap';
 import { md5 } from '../util/md5';
 import { filesFromZip } from '../vfs/archive';
 import { joinPath, normalizePath, type FileTree } from '../vfs/files';
 import { writePackageFile, type PackageMeta } from '../vfs/storage';
 import type { GhostListEntry } from './ghostlist';
 import { httpEvent, nofileText, parseFeed, parseHttp, runHttp, type HttpRequest } from './http';
+import { calendarRefs, parseICal, parseScheduleDate, type CalEvent } from './ical';
 import { moveTarget, parseMove, type Rect } from './move';
 import { rateOfUse, readProperty, writeProperty, type LogEntry, type PropertyHost, type SoundInfo } from './properties';
 import { addHistory, ghostState, saveSettings, settings, type GhostState } from './settings';
@@ -59,6 +61,8 @@ export interface InputRequest {
   max?: number;
   placeholder?: string;
   limit?: number;
+  /** 入力の候補 (inputbox.autocomplete) */
+  suggestions?: string[];
   password?: boolean;
   timeout?: number;
   noClose?: boolean;
@@ -103,7 +107,19 @@ export type ToolName =
   | 'aigraph'
   | 'addressbar'
   | 'archiveviewer'
-  | 'pictureviewer';
+  | 'pictureviewer'
+  /** スクリプトを送るボックス (SSP の Script Input) */
+  | 'sendbox';
+
+/** ネットワーク更新の頼み。targets は ghost・shell・balloon と --balloon=名前・--shell=名前 */
+export interface UpdateRequest {
+  targets: string[];
+  /** manual (メニュー) か script */
+  reason: string;
+  checkOnly?: boolean;
+  testOnly?: boolean;
+  recovery?: boolean;
+}
 
 /** ゴーストから見たベースウェア (GhostManager が実装する) */
 export interface GhostEnv {
@@ -133,7 +149,7 @@ export interface GhostEnv {
   /** 消滅 (アンインストール)。query なら確かめる */
   vanish(ghost: Ghost, opts: { next?: string; query?: boolean }): Promise<void>;
   /** ネットワーク更新 */
-  update(ghost: Ghost, opts: { targets: string[]; reason: string; checkOnly?: boolean }): Promise<void>;
+  update(ghost: Ghost, opts: UpdateRequest): Promise<void>;
   /** 読み直す (ghost・shell・balloon・descript・shiori) */
   reload(ghost: Ghost, what: string): Promise<void>;
   /** URL・ファイルからのインストール */
@@ -148,6 +164,8 @@ export interface GhostEnv {
   logs(kind: string): LogEntry[];
   /** 利用者への短い知らせ */
   toast(message: string): void;
+  /** 起動時の、ブラウザとまわりの様子の NOTIFY (OnNetworkStatusChange・OnDarkTheme など) */
+  environmentNotices(ghost: Ghost): Promise<void>;
 }
 
 interface Scope {
@@ -187,6 +205,11 @@ interface Sound {
   audio: HTMLAudioElement;
   url: string;
   revoke: boolean;
+  /** --balance・--spectrum を使うときだけ (Web Audio に通す) */
+  tap?: AudioTap;
+  balance?: number;
+  /** --spectrum の知らせ */
+  spectrum?: { timer: number; bands: number; peaks: number[]; bandPeaks: number[]; hold: number; heldAt: number };
 }
 
 const CLOSE_GRACE_MS = 800;
@@ -245,6 +268,26 @@ function mimeOf(path: string): string {
     pdf: 'application/pdf',
   };
   return types[ext] ?? 'application/octet-stream';
+}
+
+/** 更新のオプション (checkonly・testonly・recovery) */
+function updateOptions(args: string[]): Pick<UpdateRequest, 'checkOnly' | 'testOnly' | 'recovery'> {
+  return { checkOnly: hasOption(args, 'checkonly'), testOnly: hasOption(args, 'testonly'), recovery: hasOption(args, 'recovery') };
+}
+
+/** Base64 をバイト列に (読めなければ空) */
+function base64Bytes(s: string): Uint8Array {
+  try {
+    return Uint8Array.from(atob(s.trim()), (c) => c.charCodeAt(0));
+  } catch {
+    return new Uint8Array(0);
+  }
+}
+
+function bytesBase64(b: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
 }
 
 function boolArg(v: string | undefined): boolean {
@@ -521,6 +564,7 @@ export class Ghost implements PlayerHost {
     await this.notifyDressup('NOTIFY');
     await this.notify('OnNotifyUserInfo', [settings.userName, settings.userName, '', 'undef']);
     await this.notify('OnNotifyOSInfo', [`Web,,${navigator.userAgent}`, `,${navigator.hardwareConcurrency ?? 1},`, '', Math.floor(performance.now() / 60000)]);
+    await this.env.environmentNotices(this);
   }
 
   /** 着せ替えの情報 (OnNotifyDressupInfo)。起動時は NOTIFY、利用者の操作のときは GET */
@@ -631,7 +675,7 @@ export class Ghost implements PlayerHost {
    * 別のゴーストに切り替わる。OnGhostChanging (返事が無ければ OnClose) を再生して終了し、
    * 再生したスクリプトを返す (切り替え先の OnGhostChanged の Reference1)。既に終了処理中なら undefined。
    */
-  async leaveFor(target: GhostIdentity, raiseEvent: boolean): Promise<string | undefined> {
+  async leaveFor(target: GhostIdentity, raiseEvent: boolean, cache = false): Promise<string | undefined> {
     if (this.closing || this.destroyed) return undefined;
     this.closing = true;
     this.player.abort();
@@ -641,22 +685,93 @@ export class Ghost implements PlayerHost {
       if (!value) value = await this.request('GET', 'OnClose', ['user']);
       if (value) await this.playScript(value, { event: 'OnGhostChanging' });
     }
-    // 切り替えは終了ではないので、ほかのゴーストには OnOtherGhostClosed ではなく OnOtherGhostChanged を送る (切り替え先から)
-    await this.destroy({ silent: true });
+    // 切り替えは終了ではないので、ほかのゴーストには OnOtherGhostClosed ではなく OnOtherGhostChanged を送る (切り替え先から)。
+    // ゴーストキャッシュを使うときは、終わらせずにしまっておく
+    if (cache) await this.suspend();
+    else await this.destroy({ silent: true });
     return value ?? '';
+  }
+
+  /** ゴーストキャッシュに入っている (隠して止めている) */
+  private suspended = false;
+
+  get isSuspended(): boolean {
+    return this.suspended && !this.destroyed;
+  }
+
+  /** ゴーストキャッシュに入る。SHIORI はそのままに、隠して時計を止める (OnCacheSuspend) */
+  private async suspend(): Promise<void> {
+    this.player.abort();
+    this.endScript();
+    this.closeBalloons();
+    clearInterval(this.secondTimer);
+    clearTimeout(this.restoreTimer);
+    clearTimeout(this.linkHoverTimer);
+    for (const t of this.namedTimers.values()) clearTimeout(t);
+    this.namedTimers.clear();
+    for (const s of this.sounds.values()) this.stopSound(s, undefined);
+    this.env.closeInput(this);
+    this.endSelect(true);
+    hideTooltip();
+    for (const s of this.scopes.values()) {
+      s.view.el.style.visibility = 'hidden';
+      s.balloon.el.style.visibility = 'hidden';
+    }
+    this.ready = false;
+    this.suspended = true;
+    this.flushChangeNotice();
+    await this.notify('OnCacheSuspend');
+  }
+
+  /** ゴーストキャッシュから戻る (OnCacheRestore の後、切り替え・呼び出しのあいさつ) */
+  async resume(mode: BootMode): Promise<void> {
+    if (!this.suspended || this.destroyed) return;
+    this.suspended = false;
+    this.closing = false;
+    this.minimized = false;
+    for (const s of this.scopes.values()) {
+      s.view.el.style.visibility = '';
+      s.balloon.el.style.visibility = '';
+    }
+    if (mode.kind === 'changed') {
+      const refs: string[] = [mode.from.sakuraName, this.sakuraName, mode.script, '', mode.from.name, this.name];
+      refs[14] = mode.fromShell;
+      refs[15] = this.shell.name;
+      this.changeNotice = refs;
+    }
+    this.secondTimer = window.setInterval(() => void this.onSecond(), 1000);
+    this.ready = true;
+    await this.notify('OnCacheRestore');
+    this.state.bootCount = (this.state.bootCount ?? 0) + 1;
+    this.state.lastBootAt = Date.now();
+    saveSettings();
+    void this.bootTalk(mode, false);
   }
 
   /**
    * 消滅。OnVanishSelected のスクリプトを再生して終了し、そのスクリプトを返す。
    * ほかのゴーストへの OnOtherGhostVanished は GhostManager が送る
    */
-  async vanishOut(): Promise<string> {
-    this.closing = true;
+  async vanishOut(): Promise<string | undefined> {
     this.player.abort();
+    // 消滅のスクリプトの途中でバルーンをダブルクリックされたら取りやめる (OnVanishButtonHold)
+    this.vanishing = true;
+    this.vanishHeld = false;
     const value = await this.request('GET', 'OnVanishSelected');
     if (value) await this.playScript(value, { event: 'OnVanishSelected' });
+    this.vanishing = false;
+    if (this.vanishHeld || this.destroyed) return undefined;
+    this.closing = true;
     await this.destroy({ silent: true });
     return value ?? '';
+  }
+
+  private vanishing = false;
+  private vanishHeld = false;
+
+  /** インダクションモード */
+  get inductionMode(): boolean {
+    return this.modes.has('inductionmode');
   }
 
   /** 消滅の確認ダイアログの前後 (OnVanishSelecting・OnVanishCancel) */
@@ -693,6 +808,9 @@ export class Ghost implements PlayerHost {
       if (s.revoke) URL.revokeObjectURL(s.url);
     }
     this.sounds.clear();
+    for (const url of [...this.sockets.keys()]) this.closeWebSocket(url, 1000, true);
+    this.endSelect(true);
+    for (const a of this.httpAborts.values()) a.abort();
     window.speechSynthesis?.cancel();
     this.env.closeInput(this);
     this.env.setTrayIcon(this, undefined, '');
@@ -978,6 +1096,12 @@ export class Ghost implements PlayerHost {
       layout: () => this.layoutBalloon(index),
       dragged: (dx, dy) => this.dragSticky(index, dx, dy),
       pointerDown: () => this.env.focus(this),
+      mouseDownEx: (e, name) => void this.onMouseEx('OnMouseDownEx', e, name),
+      mouseUpEx: (e, name, clicked) => void this.onMouseUpEx(e, name, clicked),
+      gesture: (e, start, direction) => {
+        if (!this.ready || this.timeCritical) return;
+        void this.raise('OnMouseGesture', [e.scope, `${e.x}\x01${e.y}`, e.collision, `${start.x}\x01${start.y}`, start.collision, direction], { ifIdle: direction !== 'end' });
+      },
     });
     view.scale = settings.scale;
     const scaling = this.scalings.get(index);
@@ -1097,6 +1221,11 @@ export class Ghost implements PlayerHost {
     let left = this.env.desktop.clientWidth;
     for (const s of this.scopes.values()) if (s.renderer.visible && s.view.placed) left = Math.min(left, s.view.rect().left);
     return left;
+  }
+
+  /** 表示しているスコープ */
+  visibleScopes(): number[] {
+    return [...this.scopes].filter(([, s]) => s.renderer.visible && s.view.placed).map(([i]) => i);
   }
 
   /** キャラクターの矩形 (他のゴーストの \![move] の基準などに使う) */
@@ -1399,14 +1528,26 @@ export class Ghost implements PlayerHost {
     await this.onClick(e);
   }
 
-  /** クリック。中ボタンは OnMouseClickEx (返事が無ければ OnMouseClick) */
   private async onClick(e: CharacterMouseEvent): Promise<void> {
-    if (e.button === 2) {
-      const refs = this.mouseRefs(e);
-      refs[5] = 'middle';
-      if (await this.raise('OnMouseClickEx', refs)) return;
-    }
     await this.onMouse('OnMouseClick', e);
+  }
+
+  /** 左・右以外のボタンのイベント (Reference5 がボタンの名前) */
+  private onMouseEx(id: string, e: CharacterMouseEvent, name: string, extra: Reference[] = []): Promise<string | undefined> {
+    if (!this.ready || this.timeCritical) return Promise.resolve(undefined);
+    const refs = this.mouseRefs(e);
+    refs[2] = 0;
+    refs[5] = name;
+    return this.raise(id, [...refs, ...extra]);
+  }
+
+  /** 左・右以外のボタンを放した。OnMouseUpEx に返事が無ければクリック (2回目はダブルクリック、3回目からは MultipleClickEx) */
+  private async onMouseUpEx(e: CharacterMouseEvent, name: string, clicked: boolean): Promise<void> {
+    if (await this.onMouseEx('OnMouseUpEx', e, name)) return;
+    if (!clicked) return;
+    if (e.clicks >= 3 && (await this.onMouseEx('OnMouseMultipleClickEx', e, name, [e.clicks]))) return;
+    if (e.clicks === 2 && (await this.onMouseEx('OnMouseDoubleClickEx', e, name))) return;
+    await this.onMouseEx('OnMouseClickEx', e, name);
   }
 
   /** キャラクターに入った (OnMouseEnterAll) */
@@ -1478,13 +1619,18 @@ export class Ghost implements PlayerHost {
   }
 
   /** バルーンのダブルクリック。喋っている途中なら止める (OnBalloonBreak)。nouserbreakmode の間は止めない */
+  /** バルーンのダブルクリック。喋っている途中なら止める (SSTP のスクリプトは OnSSTPBreak、消滅中は OnVanishButtonHold、ほかは OnBalloonBreak) */
   private onBalloonDoubleClick(scope: number): void {
     if (!this.player.playing || this.modes.has('nouserbreakmode')) return;
     const script = this.currentScript;
+    const sstp = this.context.sstpSender !== undefined;
     this.broken = true;
     this.player.abort();
     this.endScript();
-    void this.raise('OnBalloonBreak', [script, scope, 0]);
+    if (this.vanishing) {
+      this.vanishHeld = true;
+      void this.raise('OnVanishButtonHold', [script, scope, 0]);
+    } else void this.raise(sstp ? 'OnSSTPBreak' : 'OnBalloonBreak', [script, scope, 0]);
   }
 
   /** 再生中のスクリプト (OnBalloonBreak 用) */
@@ -1527,6 +1673,11 @@ export class Ghost implements PlayerHost {
 
   private async openInput(req: InputRequest): Promise<InputResult> {
     const kind = this.openInputKind(req.kind);
+    // 入力の候補 (SHIORI の inputbox.autocomplete。inputbox・teachbox・communicatebox だけ)
+    if ((req.kind === 'inputbox' && req.type !== 'password') || req.kind === 'teachbox' || req.kind === 'communicatebox') {
+      const list = await this.request('GET', 'inputbox.autocomplete', [req.kind, req.kind === 'inputbox' ? (req.id ?? '') : '']);
+      if (list) req.suggestions = list.split('\x01').filter(Boolean);
+    }
     this.openInputs.push(kind);
     try {
       return await this.env.input(this, req);
@@ -1629,7 +1780,42 @@ export class Ghost implements PlayerHost {
     for (const id of ['OnFileDrop2', 'OnFileDropEx', 'OnFileDrop', 'OnFileDropped']) {
       if (await this.raise(id, id === 'OnFileDrop' || id === 'OnFileDropped' ? [paths[0], scope, files[0]?.type ?? ''] : refs)) return true;
     }
-    return false;
+    return this.dropDefault(scope, paths);
+  }
+
+  /**
+   * ゴーストが答えなかったドロップの、本体の既定の処理 (\![execute,dropdefault,file] でも)。
+   * 画像は画像ビューア、音・動画は鳴らす、アーカイブはアーカイブビューアで開き、それぞれ OnPictureViewerOpen などを送る
+   */
+  async dropDefault(scope: number, paths: string[]): Promise<boolean> {
+    const files = paths.map((p) => p.trim()).filter(Boolean);
+    const first = files[0];
+    if (!first || !this.ghostFile(first)) return false;
+    const type = mimeOf(first);
+    const refs = [files.join('\x01'), scope, files.map(mimeOf).join('\x01')];
+    if (type.startsWith('image/')) {
+      this.env.openTool(this, 'pictureviewer', [first]);
+      await this.raise('OnPictureViewerOpen', refs);
+    } else if (type.startsWith('audio/') || type.startsWith('video/')) {
+      this.playSound(first);
+      await this.raise('OnMediaPlayerOpen', refs);
+    } else if (/\.(zip|nar|lzh|7z|cab|rar)$/i.test(first)) {
+      this.env.openTool(this, 'archiveviewer', [first]);
+      await this.raise('OnArchiveViewerOpen', refs);
+    } else return false;
+    return true;
+  }
+
+  /** フォルダのドロップ (インストールできるものではないもの)。ghost/master/drop/ に写して OnDirectoryDrop */
+  async dropDirectory(scope: number, name: string, files: FileTree): Promise<void> {
+    const dir = `drop/${name.replace(/[\\/:*?"<>|]/g, '_')}`;
+    for (const [p, data] of files.entries()) this.saveFile(`ghost/master/${dir}/${p}`, data);
+    await this.raise('OnDirectoryDrop', [dir, scope]);
+  }
+
+  /** ファイルでも URL でも文字でもないもの (OnOtherObjectDropped) */
+  async dropOther(scope: number, types: string[]): Promise<void> {
+    await this.raise('OnOtherObjectDropped', [scope, types.join('\x01'), types.join('\x01')]);
   }
 
   /** URL のドロップ。OnURLQuery に返事があればそれで終わり、無ければ .nar としてインストールを試す */
@@ -1774,7 +1960,7 @@ export class Ghost implements PlayerHost {
       paused: s.audio.paused && s.audio.currentTime > 0 && !s.audio.ended,
       loop: s.audio.loop,
       volume: Math.round(s.audio.volume * 100),
-      balance: 0,
+      balance: s.balance ?? 0,
       duration: Number.isFinite(s.audio.duration) ? s.audio.duration : 0,
       position: s.audio.currentTime,
     }));
@@ -1830,6 +2016,7 @@ export class Ghost implements PlayerHost {
           lineHeight: style.fontSize * 1.5 * b.scale,
           charWidth: (style.fontSize / 2) * b.scale,
           scaling: b.scale,
+          vertical: b.vertical,
         };
       },
       sounds,
@@ -1955,8 +2142,22 @@ export class Ghost implements PlayerHost {
         return;
       case 'raiseother':
       case 'notifyother':
-        // \![raiseother,ゴースト名,イベント名,r0…]。__SYSTEM_ALL_GHOST__ で全員
-        if (arg[1] && arg[2]) for (const g of this.otherTargets(arg[1])) void (cmd === 'raiseother' ? g.raise(arg[2], arg.slice(3)) : g.notify(arg[2], arg.slice(3)));
+        // \![raiseother,ゴースト名,イベント名,r0…]。__SYSTEM_ALL_GHOST__ で全員。送れなかったら OnRaiseOtherFailure / OnNotifyOtherFailure
+        if (arg[1] && arg[2]) {
+          const failure = cmd === 'raiseother' ? 'OnRaiseOtherFailure' : 'OnNotifyOtherFailure';
+          const targets = this.otherTargets(arg[1]);
+          if (!targets.length) {
+            void this.raise(failure, ['notfound', arg[1], arg[2]]);
+            return;
+          }
+          const failed: [string, string][] = [];
+          for (const g of targets) {
+            const why = g.locked ? 'timecritical' : g.passive ? 'passivemode' : g.inductionMode ? 'inductionmode' : g.isMinimized ? 'minimized' : '';
+            if (why) failed.push([why, g.name]);
+            else void (cmd === 'raiseother' ? g.raise(arg[2], arg.slice(3)) : g.notify(arg[2], arg.slice(3)));
+          }
+          if (failed.length) void this.raise(failure, [failed.map((f) => f[0]).join('\x01'), failed.map((f) => f[1]).join('\x01'), arg[2]]);
+        }
         return;
       case 'timerraise':
       case 'timernotify':
@@ -1998,7 +2199,16 @@ export class Ghost implements PlayerHost {
         await this.open(sub, arg.slice(2));
         return;
       case 'close':
-        this.closeCommand(sub, arg[2]);
+        if (sub === 'websocket') this.closeWebSocket(arg[2] ?? '', Number(arg[3]) || 1000, false);
+        else this.closeCommand(sub, arg[2]);
+        return;
+      case 'send':
+        // \![send,websocket,URL,data…] (CRLF でつなぐ) / \![send,websocket-binary,URL,base64]
+        if (sub === 'websocket' || sub === 'websocket-binary') this.sendWebSocket(arg[2] ?? '', sub === 'websocket' ? arg.slice(3).join('\r\n') : base64Bytes(arg[3] ?? ''));
+        return;
+      case 'cancel':
+        if (sub === 'websocket') this.closeWebSocket(arg[2] ?? '', 1000, true);
+        else if (sub === 'http' || sub === 'ical' || sub === 'rss') this.httpAborts.get(arg[2] ?? '')?.abort();
         return;
       case 'set':
         await this.set(sub, arg.slice(2), scope);
@@ -2051,14 +2261,14 @@ export class Ghost implements PlayerHost {
         await this.env.vanish(this, { next: arg[1] && !arg[1].startsWith('--') ? arg[1] : undefined, query: hasOption(arg, 'query') });
         return;
       case 'updatebymyself':
-        void this.env.update(this, { targets: ['ghost'], reason: 'script', checkOnly: hasOption(arg, 'checkonly') });
+        void this.env.update(this, { targets: ['ghost'], reason: 'script', ...updateOptions(arg) });
         return;
       case 'update':
         if (sub === 'platform') this.env.toast('Engawa はページを読み直すと最新の版になります');
-        else if (sub) void this.env.update(this, { targets: sub === 'all' ? ['ghost', 'shell', 'balloon'] : sub.split('+'), reason: 'script', checkOnly: hasOption(arg, 'checkonly') });
+        else if (sub) void this.env.update(this, { targets: sub === 'all' ? ['ghost', 'shell', 'balloon'] : sub.split('+'), reason: 'script', ...updateOptions(arg) });
         return;
       case 'updateother':
-        void this.env.update(this, { targets: arg.slice(1).filter((x) => !x.startsWith('--option')), reason: 'script', checkOnly: hasOption(arg, 'checkonly') });
+        void this.env.update(this, { targets: arg.slice(1).filter((x) => x && !x.startsWith('--option')), reason: 'script', ...updateOptions(arg) });
         return;
       case 'reload':
         await this.env.reload(this, sub || 'ghost');
@@ -2426,10 +2636,80 @@ export class Ghost implements PlayerHost {
     } else if (name === 'collisionmode') {
       for (const s of this.scopes.values()) s.renderer.showCollisions(on ? ((args[0] ?? '').toLowerCase() === 'rect' ? 'rect' : 'name') : undefined);
     } else if (name === 'selectmode') {
-      // 範囲の選択はできないので、始めてすぐ取り消したことにする
-      if (on) void this.raise('OnSelectModeBegin', [scope, 'rect']).then(() => this.raise('OnSelectModeCancel', [scope, 'rect']));
-      this.modes.delete(name);
+      if (on) this.beginSelect(scope, args.slice(1));
+      else this.endSelect();
     }
+  }
+
+  /** 矩形選択モード (\![enter,selectmode,rect,…])。キャラクターの上でドラッグして範囲を選ぶ */
+  private selection?: { scope: number; el: HTMLElement; rect?: [number, number, number, number] };
+
+  private beginSelect(scope: number, init: string[]): void {
+    this.endSelect(true);
+    const s = this.scopes.get(scope);
+    if (!s?.renderer.visible) return;
+    const r = s.view.rect();
+    const el = document.createElement('div');
+    el.className = 'select-overlay';
+    Object.assign(el.style, { transform: `translate(${Math.round(r.left)}px, ${Math.round(r.top)}px)`, width: `${r.width}px`, height: `${r.height}px` });
+    const box = document.createElement('div');
+    box.className = 'select-box';
+    el.appendChild(box);
+    this.env.desktop.appendChild(el);
+    const sel: { scope: number; el: HTMLElement; rect?: [number, number, number, number] } = { scope, el };
+    this.selection = sel;
+    const zx = s.view.zoomX;
+    const zy = s.view.zoomY;
+    const show = () => {
+      const q = sel.rect;
+      box.hidden = !q;
+      if (q) Object.assign(box.style, { left: `${q[0] * zx}px`, top: `${q[1] * zy}px`, width: `${(q[2] - q[0]) * zx}px`, height: `${(q[3] - q[1]) * zy}px` });
+    };
+    // 初めの範囲: 座標 (左,上,右,下) か、当たり判定の名前
+    const nums = init.map(Number);
+    if (init.length >= 4 && nums.slice(0, 4).every(Number.isFinite)) sel.rect = [nums[0], nums[1], nums[2], nums[3]];
+    else if (init[0]) {
+      const c = this.shell.surfaces.surfaces.get(s.renderer.surfaceId)?.collisions.find((x) => x.name === init[0]);
+      if (c && c.coords.length >= 4) sel.rect = [c.coords[0], c.coords[1], c.coords[2], c.coords[3]];
+    }
+    show();
+    const local = (e: PointerEvent) => {
+      const b = el.getBoundingClientRect();
+      return [Math.round((e.clientX - b.left) / zx), Math.round((e.clientY - b.top) / zy)] as const;
+    };
+    let from: readonly [number, number] | undefined;
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      from = local(e);
+      sel.rect = [from[0], from[1], from[0], from[1]];
+      show();
+      void this.raise('OnSelectModeMouseDown', [scope, 'rect', from.join(',')]);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!from) return;
+      const p = local(e);
+      sel.rect = [Math.min(from[0], p[0]), Math.min(from[1], p[1]), Math.max(from[0], p[0]), Math.max(from[1], p[1])];
+      show();
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!from) return;
+      from = undefined;
+      void this.raise('OnSelectModeMouseUp', [scope, 'rect', local(e).join(',')]);
+    });
+    void this.raise('OnSelectModeBegin', [scope, 'rect']);
+  }
+
+  /** 選択を終える。範囲があれば OnSelectModeComplete、無ければ OnSelectModeCancel (silent なら何も送らない) */
+  private endSelect(silent = false): void {
+    const sel = this.selection;
+    if (!sel) return;
+    this.selection = undefined;
+    sel.el.remove();
+    if (silent || this.destroyed) return;
+    const q = sel.rect;
+    if (q && q[2] > q[0] && q[3] > q[1]) void this.raise('OnSelectModeComplete', [sel.scope, 'rect', q.join(',')]);
+    else void this.raise('OnSelectModeCancel', [sel.scope, 'rect']);
   }
 
   // ---------------------------------------------------------------- 見た目 (scaling・alpha・move・anim)
@@ -2572,10 +2852,24 @@ export class Ghost implements PlayerHost {
         r.offset(id(), Number(args[1]) || 0, Number(args[2]) || 0);
         return;
       case 'add': {
-        // \![anim,add,overlay,ID(,x,y)] / overlayfast / base / move,x,y / text は文字を出せないので無視
+        // \![anim,add,overlay,ID(,x,y)] / overlayfast / base / move,x,y / text,x,y,幅,高さ,文字,表示時間,r,g,b,大きさ,字体
         const method = (args[0] ?? '').toLowerCase();
         if (method === 'move') r.add('move', -1, Number(args[1]) || 0, Number(args[2]) || 0);
-        else if (method !== 'text') {
+        else if (method === 'text') {
+          const [, x, y, w, h, text = '', time, cr, cg, cb, size, font] = args;
+          const rgb = [cr, cg, cb].map((v) => Math.min(255, Math.max(0, Number(v) || 0)));
+          r.addText({
+            x: Number(x) || 0,
+            y: Number(y) || 0,
+            width: Number(w) || 0,
+            height: Number(h) || 0,
+            text: text.replace(/\\n/g, '\n'),
+            time: Number(time) || 0,
+            color: cr === undefined ? '#000' : `rgb(${rgb.join(',')})`,
+            size: Number(size) || 12,
+            font: font ? `"${font}", sans-serif` : 'sans-serif',
+          });
+        } else {
           const surface = this.shell.resolve(scope, args[1] ?? '');
           if (surface !== undefined) r.add(method, surface, Number(args[2]) || 0, Number(args[3]) || 0);
         }
@@ -2606,6 +2900,7 @@ export class Ghost implements PlayerHost {
         return;
       case 'dropdefault':
         if ((args[0] ?? '').toLowerCase() === 'url' && args[1]) await this.env.installFrom(this, args[1]);
+        else if ((args[0] ?? '').toLowerCase() === 'file') await this.dropDefault(scope, args.slice(1).flatMap((a) => a.split(/\x01/)));
         return;
       case 'extractarchive':
         await this.archive('extract', args);
@@ -2623,6 +2918,21 @@ export class Ghost implements PlayerHost {
         await this.dumpSurface(args, scope);
         return;
       case 'dumpballoon':
+        await this.dumpBalloon(args, scope);
+        return;
+      case 'websocket':
+        this.openWebSocket(args);
+        return;
+      case 'ical-get':
+      case 'ical-post': {
+        const done = this.runICal(sub === 'ical-post' ? 'post' : 'get', args);
+        if (!optionValue(args, 'async')) await done;
+        return;
+      }
+      case 'schedule-add':
+      case 'schedule-delete':
+      case 'schedule-get':
+        await this.schedule(sub.slice(9), args);
         return;
       case 'headline':
       case 'calendarplugin':
@@ -2630,7 +2940,6 @@ export class Ghost implements PlayerHost {
       case 'nslookup':
       case 'filewatch':
       case 'emptyrecyclebin':
-      case 'websocket':
         // ブラウザでは行えない
         return;
     }
@@ -2641,9 +2950,20 @@ export class Ghost implements PlayerHost {
     this.modes.add('onlinemode');
     for (const s of this.scopes.values()) if (s.balloon.shown) s.balloon.setOnline(true);
     let res: Awaited<ReturnType<typeof runHttp>>;
+    const ctrl = new AbortController();
+    this.httpAborts.set(req.url, ctrl);
+    // --progress-notify・--streaming: 届いた分を知らせる (Reference は Complete と同じ並び)
+    const onChunk =
+      req.progress || req.streaming
+        ? (chunk: Uint8Array, received: number, total: number) => {
+            if (req.streaming) void this.raise('OnExecuteHTTPStreaming', [req.method, req.id, req.url, '', new TextDecoder().decode(chunk).replace(/\r\n|\r|\n/g, '\x01'), '', '']);
+            if (req.progress) void this.raise('OnExecuteHTTPProgress', [req.method, req.id, req.url, '', 'downloading', '', '', received, total]);
+          }
+        : undefined;
     try {
-      res = await runHttp(req);
+      res = await runHttp(req, ctrl.signal, onChunk);
     } finally {
+      this.httpAborts.delete(req.url);
       this.modes.delete('onlinemode');
       for (const s of this.scopes.values()) s.balloon.setOnline(false);
     }
@@ -2663,6 +2983,185 @@ export class Ghost implements PlayerHost {
       body = path.slice('ghost/master/'.length);
     }
     await this.raise(httpEvent(req, res.ok), [req.method, req.id, req.url, body, res.code, '', res.headers]);
+  }
+
+  // ---------------------------------------------------------------- WebSocket・iCal・予定表
+
+  private readonly sockets = new Map<string, { ws: WebSocket; id: string; opened: boolean; userClosed: boolean; retries: number; timer?: number }>();
+  /** 進行中の HTTP・iCal (\![cancel,http,URL]) */
+  private readonly httpAborts = new Map<string, AbortController>();
+
+  /** --async=On… ならその名前 (+ 後ろに付けるもの)、無ければ既定の名前 */
+  private eventName(id: string, base: string, suffix: string): string {
+    return /^On/.test(id) ? `${id}${suffix}` : `${base}${suffix}`;
+  }
+
+  /** \![execute,websocket,URL,--async=ID]。切れたら5回までつなぎ直す */
+  private openWebSocket(args: string[]): void {
+    const url = args[0]?.trim();
+    if (!url || this.sockets.has(url)) return;
+    const id = optionValue(args, 'async') ?? optionValue(args, 'sync') ?? '';
+    const base = 'OnExecuteWebSocket';
+    const connect = () => {
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(url);
+      } catch (e) {
+        void this.raise(this.eventName(id, base, 'Failure'), [id, url, (e as Error).message]);
+        this.sockets.delete(url);
+        return;
+      }
+      ws.binaryType = 'arraybuffer';
+      const entry = this.sockets.get(url) ?? { ws, id, opened: false, userClosed: false, retries: 0 };
+      entry.ws = ws;
+      this.sockets.set(url, entry);
+      ws.addEventListener('open', () => {
+        const reconnect = entry.opened;
+        entry.opened = true;
+        entry.retries = 0;
+        void this.raise(this.eventName(id, base, reconnect ? 'Reconnect' : 'Open'), [id, url, '200']);
+      });
+      ws.addEventListener('message', (e: MessageEvent) => {
+        const text = typeof e.data === 'string';
+        const data = text ? (e.data as string).replace(/\r\n|\r|\n/g, '\x01') : bytesBase64(new Uint8Array(e.data as ArrayBuffer));
+        void this.raise(/^On/.test(id) ? id : `${base}Receive`, [id, url, text ? '1' : '2', data]);
+      });
+      ws.addEventListener('close', (e: CloseEvent) => {
+        if (this.sockets.get(url)?.ws !== ws) return;
+        if (entry.userClosed || e.code === 1000 || this.destroyed) {
+          this.sockets.delete(url);
+          if (!this.destroyed) void this.raise(this.eventName(id, base, 'Close'), [id, url, entry.userClosed && e.code !== 1000 ? 'userbreak' : String(e.code)]);
+          return;
+        }
+        // 異常な切断: 最初の接続に失敗したか、5回つなぎ直しても駄目なら失敗
+        if (!entry.opened || entry.retries >= 5) {
+          this.sockets.delete(url);
+          void this.raise(this.eventName(id, base, 'Failure'), [id, url, String(e.code || 'error')]);
+          return;
+        }
+        entry.retries++;
+        entry.timer = window.setTimeout(connect, 1000 * 2 ** (entry.retries - 1));
+      });
+    };
+    connect();
+  }
+
+  private sendWebSocket(url: string, data: string | Uint8Array): void {
+    const s = this.sockets.get(url);
+    if (s?.ws.readyState === WebSocket.OPEN) s.ws.send(data as string | ArrayBufferView<ArrayBuffer>);
+  }
+
+  /** \![close,websocket,URL,code] / \![cancel,websocket,URL] (cancel は userbreak) */
+  private closeWebSocket(url: string, code: number, cancel: boolean): void {
+    const s = this.sockets.get(url);
+    if (!s) return;
+    s.userClosed = true;
+    clearTimeout(s.timer);
+    if (cancel) {
+      this.sockets.delete(url);
+      try {
+        s.ws.close();
+      } catch {
+        // 閉じている
+      }
+      if (!this.destroyed) void this.raise(this.eventName(s.id, 'OnExecuteWebSocket', 'Close'), [s.id, url, 'userbreak']);
+      return;
+    }
+    try {
+      s.ws.close(code === 1000 || (code >= 3000 && code <= 4999) ? code : 1000);
+    } catch {
+      s.ws.close();
+    }
+  }
+
+  /** \![execute,ical-get / ical-post,URL,…] (--from・--to・--expand・--limit で絞る) */
+  private async runICal(method: 'get' | 'post', args: string[]): Promise<void> {
+    const req = parseHttp(`http-${method}`, args);
+    if (!req) return;
+    const id = req.id;
+    const fail = (code: string) => this.raise(this.eventName(id, 'OnExecuteICal', 'Failure'), [method, id, req.url, '', code]);
+    const ctrl = new AbortController();
+    this.httpAborts.set(req.url, ctrl);
+    let res: Awaited<ReturnType<typeof runHttp>>;
+    try {
+      res = await runHttp(req, ctrl.signal);
+    } finally {
+      this.httpAborts.delete(req.url);
+    }
+    if (this.destroyed) return;
+    if (!res.ok || !res.data) {
+      await fail(res.code);
+      return;
+    }
+    const cal = parseICal(new TextDecoder('utf-8').decode(res.data));
+    if (!cal) {
+      await fail('parse');
+      return;
+    }
+    const filter = { from: optionValue(args, 'from'), to: optionValue(args, 'to'), expand: args.some((a) => /^--expand(=|$)/i.test(a.trim())) ? (optionValue(args, 'expand') ?? '') : undefined, limit: optionValue(args, 'limit') };
+    await this.raise(/^On/.test(id) ? id : 'OnExecuteICalComplete', calendarRefs(cal, filter));
+  }
+
+  /** ゴースト用の予定表 (すべてのゴーストで共有。ページに保存する) */
+  private async schedule(op: string, args: string[]): Promise<void> {
+    const event = optionValue(args, 'event') ?? '';
+    const ok = /^On/.test(event) ? event : op === 'get' ? 'OnExecuteScheduleGetComplete' : 'OnExecuteScheduleComplete';
+    const ng = /^On/.test(event) ? `${event}Failure` : 'OnExecuteScheduleFailure';
+    const list = (settings.schedule ??= []);
+    if (op === 'get') {
+      const filter = { from: optionValue(args, 'from'), to: optionValue(args, 'to'), expand: args.some((a) => /^--expand(=|$)/i.test(a.trim())) ? (optionValue(args, 'expand') ?? '') : undefined, limit: optionValue(args, 'limit') };
+      await this.raise(ok, calendarRefs({ name: 'ghost', timezone: '', calscale: 'GREGORIAN', events: list }, filter));
+      return;
+    }
+    // SSTP など外からのスクリプトでは予定を変えられない
+    if (this.context.kinds?.some((k) => k === 'sstp-send' || k === 'remote')) {
+      await this.raise(ng, [op, 'notauthorized', optionValue(args, 'uid') ?? args[0] ?? '']);
+      return;
+    }
+    if (op === 'delete') {
+      const uid = optionValue(args, 'uid') ?? args.find((a) => !a.startsWith('--')) ?? '';
+      const i = list.findIndex((e) => e.uid === uid);
+      if (!uid) await this.raise(ng, [op, 'invalid', '']);
+      else if (i < 0) await this.raise(ng, [op, 'notfound', uid]);
+      else {
+        list.splice(i, 1);
+        saveSettings();
+        await this.raise(ok, [op, uid]);
+      }
+      return;
+    }
+    const summary = optionValue(args, 'summary');
+    const start = parseScheduleDate(optionValue(args, 'start') ?? '');
+    const endArg = optionValue(args, 'end');
+    const end = endArg ? parseScheduleDate(endArg) : start;
+    const uid = optionValue(args, 'uid') ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}@engawa`;
+    if (!summary || !start || !end || /\s/.test(uid)) {
+      await this.raise(ng, [op, 'invalid', uid]);
+      return;
+    }
+    const strip = (v: string | undefined) => (v ?? '').replace(/^"|"$/g, '');
+    const ev: CalEvent = {
+      uid,
+      start,
+      end,
+      summary,
+      description: optionValue(args, 'description') ?? '',
+      location: optionValue(args, 'location') ?? '',
+      url: optionValue(args, 'url') ?? '',
+      status: (optionValue(args, 'status') ?? '').toUpperCase(),
+      categories: strip(optionValue(args, 'categories')),
+      rrule: strip(optionValue(args, 'rrule')),
+      exdates: strip(optionValue(args, 'exdate'))
+        .split(',')
+        .map((d) => parseScheduleDate(d))
+        .filter((d): d is NonNullable<typeof d> => !!d)
+        .map((d) => String(Math.floor(Date.UTC(d.y, d.m - 1, d.d) / 86_400_000))),
+    };
+    const i = list.findIndex((e) => e.uid === uid);
+    if (i >= 0) list[i] = ev;
+    else list.push(ev);
+    saveSettings();
+    await this.raise(ok, [op, uid]);
   }
 
   /** ゴーストのフォルダの中のパス (ghost/master/ からの相対か、ゴーストのフォルダからの相対) */
@@ -2721,14 +3220,23 @@ export class Ghost implements PlayerHost {
   private async createNar(out?: string): Promise<void> {
     const entries: Record<string, Uint8Array> = {};
     for (const p of this.files.list()) if (!p.startsWith('ghost/master/var/')) entries[p] = this.files.get(p)!;
-    const zip = zipSync(entries);
     const name = out ? out.split(/[\\/]/).pop()! : `${this.meta.dir}.nar`;
-    if (out) this.saveFile(this.ghostPath(out), zip);
+    const path = out ? this.ghostPath(out) : `download/${name}`;
+    await this.raise('OnNarCreating', [this.name, path, 'ghost'], { wait: true });
+    const zip = zipSync(entries);
+    if (out) this.saveFile(path, zip);
     download(name, zip);
+    void this.raise('OnNarCreated', [this.name, path, 'ghost']);
   }
 
   /** \![execute,createupdatedata]: updates2.dau と updates.txt を作る */
   private createUpdateData(out?: string): void {
+    void this.notify('OnUpdatedataCreating');
+    this.writeUpdateData(out);
+    void this.raise('OnUpdatedataCreated');
+  }
+
+  private writeUpdateData(out?: string): void {
     const lines = this.files
       .list()
       .filter((p) => !/^(updates2\.dau|updates\.txt)$/i.test(p) && !p.startsWith('ghost/master/var/') && !/(^|\/)(profile|ghost\/master\/drop|ghost\/master\/upload)\//.test(p))
@@ -2781,6 +3289,24 @@ export class Ghost implements PlayerHost {
     };
     if (event) void run();
     else await run();
+  }
+
+  /** \![execute,dumpballoon,フォルダ,スコープ,prefix,イベント] (--dir= など、--hide=balloonmarker,balloonnum も) */
+  private async dumpBalloon(args: string[], scope: number): Promise<void> {
+    const plain = args.filter((x) => !x.startsWith('--'));
+    const dir = optionValue(args, 'dir') ?? plain[0] ?? '';
+    const sc = Number(optionValue(args, 'scope') ?? plain[1] ?? scope) || 0;
+    const prefix = optionValue(args, 'prefix') ?? plain[2] ?? 'balloon';
+    const event = optionValue(args, 'event') ?? optionValue(args, 'async') ?? plain[3];
+    const hide = (optionValue(args, 'hide') ?? '').replace(/^"|"$/g, '').split(',').map((s) => s.trim().toLowerCase());
+    const b = this.scopes.get(sc)?.balloon;
+    let count = 0;
+    const blob = b ? await b.snapshot(hide) : null;
+    if (blob) {
+      this.saveFile(joinPath(this.ghostPath(dir || 'dump'), `${prefix}${sc}.png`), new Uint8Array(await blob.arrayBuffer()));
+      count = 1;
+    }
+    if (event) await this.raise(event, [count]);
   }
 
   // ---------------------------------------------------------------- 同期オブジェクト
@@ -2867,6 +3393,14 @@ export class Ghost implements PlayerHost {
       if (data) this.startSound(effect.path, URL.createObjectURL(new Blob([data as BlobPart])), { revoke: true });
     } else if (effect.kind === 'write') {
       this.saveFile(effect.path, effect.data);
+    } else if (effect.kind === 'speak' && typeof speechSynthesis !== 'undefined') {
+      if (effect.stop) speechSynthesis.cancel();
+      else if (effect.text) {
+        const u = new SpeechSynthesisUtterance(effect.text);
+        u.lang = 'ja-JP';
+        if (effect.rate) u.rate = Math.min(10, Math.max(0.1, effect.rate));
+        speechSynthesis.speak(u);
+      }
     }
   }
 
@@ -2919,7 +3453,60 @@ export class Ghost implements PlayerHost {
     if (seek !== undefined && Number.isFinite(Number(seek))) s.audio.currentTime = Number(seek) / 1000;
     const loop = optionValue(options, 'loop');
     if (loop !== undefined) s.audio.loop = boolArg(loop);
+    const balance = optionValue(options, 'balance');
+    if (balance !== undefined && Number.isFinite(Number(balance))) {
+      s.balance = Number(balance);
+      this.soundTap(s)?.setBalance(s.balance);
+    }
+    const spectrum = optionValue(options, 'spectrum');
+    if (spectrum !== undefined) this.soundSpectrum(s, Number(spectrum) || 0, optionValue(options, 'spectrum-bands'), optionValue(options, 'spectrum-hold'));
     return true;
+  }
+
+  /** Web Audio に通す (ゴーストのファイルだけ。よそのサイトの音は CORS で無音になるので通さない) */
+  private soundTap(s: Sound): AudioTap | undefined {
+    if (!s.tap && s.url.startsWith('blob:')) s.tap = AudioTap.attach(s.audio);
+    return s.tap;
+  }
+
+  /** --spectrum=間隔(ms): 鳴っている間 OnSoundSpectrum を送る。0 で止める (止めるときは0の知らせを1回) */
+  private soundSpectrum(s: Sound, interval: number, bandsArg?: string, holdArg?: string): void {
+    const zero = () => {
+      const sp = s.spectrum;
+      if (!sp) return;
+      void this.notify('OnSoundSpectrum', [s.name, sp.bands, '0\x010', '0\x010', new Array(sp.bands).fill(0).join('\x01'), new Array(sp.bands).fill(0).join('\x01'), Math.round(s.audio.currentTime * 1000)]);
+    };
+    if (s.spectrum) {
+      clearInterval(s.spectrum.timer);
+      zero();
+      s.spectrum = undefined;
+    }
+    if (interval <= 0) return;
+    const tap = this.soundTap(s);
+    if (!tap) return;
+    const allowed = [0, 5, 10, 15, 31];
+    const bands = allowed.includes(Number(bandsArg)) ? Number(bandsArg) : 10;
+    const sp = { timer: 0, bands, peaks: [0, 0], bandPeaks: new Array(bands).fill(0), hold: Number(holdArg) || 1000, heldAt: performance.now() };
+    sp.timer = window.setInterval(() => {
+      if (this.destroyed || !this.sounds.has(s.name.toLowerCase())) {
+        clearInterval(sp.timer);
+        return;
+      }
+      if (s.audio.paused) return;
+      const f = tap.measure(bands);
+      const now = performance.now();
+      // ピークは hold ms のあいだ保ち、過ぎたら今の値に戻す
+      if (now - sp.heldAt > sp.hold) {
+        sp.peaks = [...f.channels];
+        sp.bandPeaks = [...f.bands];
+        sp.heldAt = now;
+      } else {
+        sp.peaks = f.channels.map((v, i) => Math.max(v, sp.peaks[i] ?? 0));
+        sp.bandPeaks = f.bands.map((v, i) => Math.max(v, sp.bandPeaks[i] ?? 0));
+      }
+      void this.notify('OnSoundSpectrum', [s.name, bands, f.channels.join('\x01'), sp.peaks.join('\x01'), f.bands.join('\x01'), sp.bandPeaks.join('\x01'), Math.round(s.audio.currentTime * 1000)]);
+    }, Math.max(16, interval));
+    s.spectrum = sp;
   }
 
   /** 音を鳴らす。同じ名前の音は止めてから。終わったら OnSoundStop、失敗したら OnSoundError */
@@ -2932,6 +3519,12 @@ export class Ghost implements PlayerHost {
     this.sounds.set(name.toLowerCase(), sound);
     if (opts.options) this.soundOption(name, opts.options);
     audio.addEventListener('ended', () => this.stopSound(sound, 'end'));
+    // ループで頭に戻った (OnSoundLoop)
+    let last = 0;
+    audio.addEventListener('timeupdate', () => {
+      if (audio.loop && audio.currentTime + 0.5 < last) void this.notify('OnSoundLoop', [name]);
+      last = audio.currentTime;
+    });
     audio.addEventListener('error', () => {
       this.forgetSound(sound);
       void this.raise('OnSoundError', ['play', audio.error?.code ?? 0, name, audio.error?.message ?? '']);
@@ -2955,6 +3548,7 @@ export class Ghost implements PlayerHost {
   /** reason があれば OnSoundStop を送る */
   private stopSound(s: Sound, reason: 'end' | 'close' | undefined): void {
     s.audio.pause();
+    if (s.spectrum) this.soundSpectrum(s, 0);
     this.forgetSound(s);
     if (reason) void this.notify('OnSoundStop', [s.name, reason]);
   }

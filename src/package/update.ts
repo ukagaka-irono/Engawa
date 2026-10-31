@@ -1,6 +1,7 @@
 import { md5 } from '../util/md5';
 import { decodeText } from '../util/text';
 import type { FileTree } from '../vfs/files';
+import { parseDeleteList } from './installer';
 
 /**
  * ネットワーク更新 (ukadoc の「ネットワーク更新」「updates2.dau/updates.txt」)。
@@ -46,6 +47,8 @@ export interface UpdateHooks {
   raise(id: string, refs: (string | number)[]): Promise<unknown>;
   /** 取り直したファイルを保存する (パッケージのルートからの相対パス) */
   write(path: string, data: Uint8Array): Promise<void>;
+  /** delete.txt に書かれたファイルを消す (末尾が / はディレクトリ) */
+  remove?(paths: string[]): Promise<void>;
 }
 
 export interface UpdateOptions {
@@ -55,6 +58,12 @@ export interface UpdateOptions {
   reason: string;
   /** 更新の有無だけを調べる (\![update,…,checkonly]) */
   checkOnly?: boolean;
+  /** 取ってくるが置き換えない (testonly) */
+  testOnly?: boolean;
+  /** 手元の MD5 を見ずにすべて取り直す (recovery) */
+  recovery?: boolean;
+  /** ゴースト以外 (シェル・バルーン)。イベントの名前が OnUpdateOther… になる */
+  other?: boolean;
   ghostName: string;
   path: string;
 }
@@ -95,19 +104,22 @@ function encodePath(path: string): string {
 
 export async function networkUpdate(homeurl: string, files: FileTree, hooks: UpdateHooks, opts: UpdateOptions): Promise<UpdateResult> {
   const { target, reason } = opts;
+  // シェル・バルーンの更新は OnUpdateOther… (ukadoc の「ネットワーク更新イベント」)
+  const ev = opts.other ? 'OnUpdateOther' : 'OnUpdate';
   const fail = async (why: string, file = ''): Promise<UpdateResult> => {
     if (opts.checkOnly) await hooks.raise('OnUpdateCheckFailure', [why, '', '', '', reason]);
-    else await hooks.raise('OnUpdateFailure', [why, file, '', target, reason]);
+    else await hooks.raise(`${ev}Failure`, [why, file, '', target, reason]);
     return { ok: false, changed: [], reason: why, file };
   };
   const base = updateBase(homeurl);
-  if (!opts.checkOnly) await hooks.raise('OnUpdateBegin', [opts.ghostName, opts.path, '', target, reason]);
+  if (!opts.checkOnly) await hooks.raise(`${ev}Begin`, [opts.ghostName, opts.path, '', target, reason]);
   if (!base) return fail('404');
   let list = await fetchBytes(`${base}updates2.dau`);
   if (!list.data) list = await fetchBytes(`${base}updates.txt`);
   if (!list.data) return fail(list.code);
   const entries = parseUpdateList(list.data);
   const changed = entries.filter((e) => {
+    if (opts.recovery) return true;
     const local = files.get(e.path);
     return !local || md5(local) !== e.md5;
   });
@@ -117,26 +129,60 @@ export async function networkUpdate(homeurl: string, files: FileTree, hooks: Upd
     return { ok: true, changed: changed.map((e) => e.path) };
   }
   if (!changed.length) {
-    await hooks.raise('OnUpdateComplete', ['none', '', '', target, reason]);
+    await removeListed(files, hooks);
+    await hooks.raise(`${ev}Complete`, ['none', '', '', target, reason]);
     return { ok: true, changed: [] };
   }
-  await hooks.raise('OnUpdateReady', [changed.length - 1, names, '', target, reason]);
+  await hooks.raise(`${ev}Ready`, [changed.length - 1, names, '', target, reason]);
   const done: string[] = [];
   for (let i = 0; i < changed.length; i++) {
     const e = changed[i];
-    await hooks.raise('OnUpdate.OnDownloadBegin', [e.path, i, changed.length - 1, target, reason]);
+    await hooks.raise(`${ev}.OnDownloadBegin`, [e.path, i, changed.length - 1, target, reason]);
     const got = await fetchBytes(`${base}${encodePath(e.path)}`);
     if (!got.data) return fail(got.code, e.path);
     const hash = md5(got.data);
-    await hooks.raise('OnUpdate.OnMD5CompareBegin', [e.path, e.md5, hash, target, reason]);
+    await hooks.raise(`${ev}.OnMD5CompareBegin`, [e.path, e.md5, hash, target, reason]);
     if (hash !== e.md5) {
-      await hooks.raise('OnUpdate.OnMD5CompareFailure', [e.path, e.md5, hash, target, reason]);
+      await hooks.raise(`${ev}.OnMD5CompareFailure`, [e.path, e.md5, hash, target, reason]);
       return fail('md5 miss', e.path);
     }
-    await hooks.raise('OnUpdate.OnMD5CompareComplete', [e.path, e.md5, hash, target, reason]);
-    await hooks.write(e.path, got.data);
+    await hooks.raise(`${ev}.OnMD5CompareComplete`, [e.path, e.md5, hash, target, reason]);
+    if (!opts.testOnly) {
+      await hooks.write(e.path, got.data);
+      files.set(e.path, got.data);
+    }
     done.push(e.path);
   }
-  await hooks.raise('OnUpdateComplete', ['changed', done.join(','), '', target, reason]);
+  if (!opts.testOnly) await removeListed(files, hooks);
+  await hooks.raise(`${ev}Complete`, ['changed', done.join(','), '', target, reason]);
   return { ok: true, changed: done };
+}
+
+/** delete.txt に書かれたファイルを消す (更新で一度配ったファイルを取り除くためのもの) */
+async function removeListed(files: FileTree, hooks: UpdateHooks): Promise<void> {
+  const list = files.get('delete.txt');
+  if (!list || !hooks.remove) return;
+  const paths = parseDeleteList(list).map((p) => p.replace(/\\/g, '/'));
+  if (!paths.length) return;
+  await hooks.remove(paths);
+  for (const p of paths) {
+    if (p.endsWith('/')) for (const f of files.list(p.slice(0, -1))) files.delete(f);
+    else files.delete(p);
+  }
+}
+
+/** 更新の結果1つ (OnUpdateResult・OnUpdateResultEx の Reference) */
+export interface UpdateSummary {
+  name: string;
+  target: string;
+  result: UpdateResult;
+}
+
+/** OnUpdateResult の Reference (種別\1OK・NG\1数か理由\1ファイル) と OnUpdateResultEx (名前\1種別\1…) */
+export function updateResultRefs(list: UpdateSummary[], ex: boolean): string[] {
+  return list.map(({ name, target, result }) => {
+    const fields = [target, result.ok ? 'OK' : 'NG', result.ok ? String(result.changed.length) : (result.reason ?? '')];
+    if (!result.ok && result.file) fields.push(result.file);
+    return (ex ? [name, ...fields] : fields).join('\x01');
+  });
 }
