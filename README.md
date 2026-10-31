@@ -107,6 +107,9 @@ Internet Explorer には対応していません。
 - **別の言語の実行環境を呼ぶ SHIORI** (里珠 (Perl)・PIXY (PHP)・Ruby栞・phiori (Python)) は動きません。
 - kagari のゴーストが使う LuaSocket・Lua Lanes は読み込めますが、ソケットはつながらず、別のスレッドの処理 (lane) は動きません。
 - 実行ファイルの中にゴーストを書いた SHIORI (Go・Zig などで書いて DLL にしたもの、SHIOLINK から別のプログラムを呼ぶもの) は動きません。
+  ただし SHIOLINK で Node.js のプログラム (`commandline = node …`。shiolinkjs を使うものなど) を動かすものは、ブラウザの中の小さな Node.js
+  (CommonJS の require・process・標準入出力。ws はブラウザの WebSocket に、SSP への SSTP over HTTP は Engawa の SSTP に置き換える) で動かします。
+  Node.js にしか無いもの (ファイル以外の fs・net・child_process など) を使うプログラムは動きません。
 - pasta は LuaJIT の代わりに標準の Lua 5.4 で動かすので、LuaJIT にしか無いもの (`jit`・`ffi`・`bit`) を使う台本は動きません。
 - minato が内部でパニックした場合、その SHIORI はそこで止まります (Safari 12 で動かすため、Rust の例外処理を使わずに組んでいます)。
 
@@ -200,14 +203,26 @@ SAORI について、できないこと・違うこと:
 インストールしたプラグイン (PLUGIN/2.0) を読み込み、SSP と同じくイベントを送ります。
 プラグインの DLL は SHIORI と同じ形 (load / request / unload) なので、上の SHIORI の仕組みで動かします。
 いま使われているプラグインの多くは YAYA の辞書で書かれたもの (YAYA as PLUGIN。スタンプ帳・BalloonSelector など) で、そのまま動きます。
-kagari で書いたもの (kagari_as_plugin) も動きます。
+kagari で書いたもの (kagari_as_plugin) と、SHIOLINK で Node.js のプログラムを動かすもの (shiolinkjs を使うもの。Nostrゅう) も動きます。
 
 - 本体から送るもの: version・installedplugin・installedghostname・installedballoonname・ghostpathlist などの NOTIFY、OnSecondChange (`secondchangeinterval`)、
   OnOtherGhostTalk (`otherghosttalk` の before・after)、OnGhostBoot・OnGhostExit・OnGhostInfoUpdate、メニューの「プラグイン」からの OnMenuExec、OnInstallComplete
 - ゴーストから: `\![raiseplugin]`・`\![notifyplugin]`・`\![timerraiseplugin]`・`\![timernotifyplugin]` (送れなければ OnRaisePluginFailure・OnNotifyPluginFailure)、
   SHIORI の installedplugin・pluginpathlist、SSTP の `GetPluginNameList`
 - プラグインの応答: Event・EventOption (notify)・Reference・Target (`__SYSTEM_ALL_GHOST__` を含む)・Script・ScriptOption (nobreak・notranslate)・Marker。
-  プラグインが出したスクリプトの選択肢・アンカーと、`\![raise]`・`\![notify]`・`\![get,property]` のイベントは、そのプラグインに返します
+  プラグインが出したスクリプトの選択肢・アンカー・入力ボックスと、`\![raise]`・`\![notify]`・`\![get,property]` のイベントは、そのプラグインに返します
+
+GitHub の [ukagaka-plugin](https://github.com/topics/ukagaka-plugin) のプラグインを、リリースの版ごとにすべて試した結果です (2026年11月)。
+
+| プラグイン | 版 | Engawa では |
+|---|---|---|
+| BalloonSelector・Wallet of Unyu・DBdiary・CharameLNetwork・スタンプ帳・CD Player | すべての版 (1.8.0〜2.4.0・1.0.0〜1.2.0・1.0.0〜1.0.1・0.1〜0.5・最新・1.0) | 動く (YAYA) |
+| Kagari_as_Plugin | 1.1.1・1.2.0 | 動く (kagari) |
+| Nostrゅう | 0.1.0・0.2.0 | 動く (SHIOLINK と Node.js)。リレーへは WebSocket でつなぐ |
+| UkagakaGhostMessenger | 2.0.0・2.0.1 | YAYA の部分は動くが、画面 (同梱の ugm_server.exe の localhost:8000) は開けない |
+| Bouyomi・GetWindowTitle・CeVIO-Talker・A.I.VOICE送信 | すべての版 (1.0〜1.5.1・1.0.0・1.0.0〜1.0.7・1.0.0〜1.0.2) | YAYA の部分は動くが、同梱の実行ファイル (棒読みちゃん・CeVIO・A.I.VOICE・ほかのアプリの窓) は使えないので、読み上げなどはしない |
+| うかてん・うかどんゅう・すどはいくゅう・UkagakaGhostMessenger 1.x | すべての版 | 動かない (灯で書かれている) |
+| CeVIO-TalkerV2・TMIDI Messages | すべての版 | 動かない (Windows の DLL のまま。CeVIO・TMIDI Player を操作する) |
 
 できないこと:
 

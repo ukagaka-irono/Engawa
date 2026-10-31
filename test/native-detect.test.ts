@@ -63,6 +63,11 @@ describe('detectNativeEngine', () => {
     expect(detectNativeEngine('shiori.dll', ghost({ 'emo/shiori/init.lua': '' }))?.id).toBe('emo');
   });
 
+  it('WebAssembly にしていない SHIORI の DLL なら、設定ファイルで当て推量しない (灯のプラグインが YAYA as SAORI を持つとき)', () => {
+    expect(detectNativeEngine('akari.dll', ghost({ 'akari.dll': dll('main.azr'), 'yaya.txt': '' }))).toBeUndefined();
+    expect(detectNativeEngine('SHIOLINK.dll', ghost({ 'yaya.txt': '' }))).toBeUndefined();
+  });
+
   it('どれにも当たらなければ undefined', () => {
     expect(detectNativeEngine('shiori.dll', ghost({ 'shiori.dll': dll('something else') }))).toBeUndefined();
     expect(detectNativeEngine('dnproxy.dll', ghost({ 'user.dll': dll('x') }))).toBeUndefined();

@@ -170,6 +170,8 @@ export interface GhostEnv {
   environmentNotices(ghost: Ghost): Promise<void>;
   /** プラグイン (PLUGIN/2.0) */
   readonly plugins?: PluginBridge;
+  /** SSTP を受ける (SHIORI が送ったもの。同じページから) */
+  sstp?(request: string): Promise<string>;
 }
 
 interface Scope {
@@ -563,6 +565,7 @@ export class Ghost implements PlayerHost {
         this.env.log(this, 'error', m);
       },
       onSaori: (effect) => this.onSaori(effect),
+      onSstp: (request) => this.env.sstp?.(request) ?? Promise.resolve('SSTP/1.4 501 Not Implemented\r\n\r\n'),
     });
     try {
       await shiori.load();
@@ -2586,20 +2589,24 @@ export class Ghost implements PlayerHost {
       noClose: args.some((x) => /^--option=+noclose$/i.test(x)),
     };
     const extra = type === 'slider' ? `${req.min ?? 0},${req.max ?? 100}` : '';
+    // プラグインが出したスクリプトの入力ボックスなら、結果はそのプラグインに送る
+    const plugin = this.context.plugin;
+    const send = async (event: string, r: Reference[], opts: RaiseOptions = {}): Promise<boolean> =>
+      plugin ? !!(await this.env.plugins?.forward(this, plugin, 'GET', [[event, r]])) : !!(await this.raise(event, r, opts));
     const res = await this.openInput(req);
     if ('value' in res) {
       const secret = type === 'password';
-      if (/^On/.test(id)) await this.raise(id, [res.value, extra, ...refs], { secret });
-      else if (type === 'textarea') await this.raise('OnTextAreaInput', [id, res.value, '', ...refs]);
-      else await this.raise('OnUserInput', [id, res.value, extra, ...refs], { secret });
+      if (/^On/.test(id)) await send(id, [res.value, extra, ...refs], { secret });
+      else if (type === 'textarea') await send('OnTextAreaInput', [id, res.value, '', ...refs]);
+      else await send('OnUserInput', [id, res.value, extra, ...refs], { secret });
       return;
     }
     if (type === 'textarea') {
-      await this.raise('OnTextAreaInputCancel', [id, res.cancelled, '', ...refs]);
+      await send('OnTextAreaInputCancel', [id, res.cancelled, '', ...refs]);
       return;
     }
-    const played = await this.raise('OnUserInputCancel', [id, res.cancelled, extra, ...refs]);
-    if (!played && res.cancelled === 'timeout') await this.raise('OnUserInput', [id, 'timeout', extra, ...refs]);
+    const played = await send('OnUserInputCancel', [id, res.cancelled, extra, ...refs]);
+    if (!played && res.cancelled === 'timeout') await send('OnUserInput', [id, 'timeout', extra, ...refs]);
   }
 
   /**

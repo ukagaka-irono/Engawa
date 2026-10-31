@@ -17,7 +17,8 @@ export type WorkerReply =
   | { id: number; type: 'result'; ok: false; error: string }
   | { type: 'write'; path: string; data: Uint8Array }
   | { type: 'log'; message: string }
-  | { type: 'saori'; effect: SaoriEffect };
+  | { type: 'saori'; effect: SaoriEffect }
+  | { type: 'sstp'; id: number; request: string };
 
 /**
  * Web Worker の中で動く SHIORI の共通部分 (JS 製・DLL を WebAssembly にしたもの)。
@@ -96,6 +97,13 @@ export abstract class WorkerShiori {
     }
     if (msg.type === 'saori') {
       this.hooks.onSaori?.(msg.effect);
+      return;
+    }
+    if (msg.type === 'sstp') {
+      const worker = this.worker;
+      void (this.hooks.onSstp?.(msg.request) ?? Promise.resolve('SSTP/1.4 501 Not Implemented\r\n\r\n')).then((response) =>
+        worker?.postMessage({ type: 'sstp-response', id: msg.id, response }),
+      );
       return;
     }
     const p = this.pending.get(msg.id);

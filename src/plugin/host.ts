@@ -13,6 +13,8 @@ export interface PluginEnv {
   installed(): PackageMeta[];
   /** エラーログ (プラグインの名前で) */
   log(name: string, text: string): void;
+  /** プラグインが送った SSTP を受ける */
+  sstp(request: string): Promise<string>;
 }
 
 /** ゴーストの側から呼ぶもの (GhostEnv.plugins) */
@@ -94,6 +96,7 @@ export class PluginHost implements PluginBridge {
         onWrite: (path, data) => void writePackageFile(m.key, path, data).catch((e) => console.warn('[plugin save]', e)),
         onLog: (text) => this.env.log(plugin.name, text),
         onSaori: (effect) => this.onSaori(plugin, effect),
+        onSstp: (request) => this.env.sstp(request),
       });
       this.plugins.push(plugin);
       void this.start(plugin);

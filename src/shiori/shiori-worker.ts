@@ -5,6 +5,7 @@
 import { decodeText, encodeText } from '../util/text';
 import { normalizePath } from '../vfs/files';
 import { runModuleScript } from './module-script';
+import { startNode } from './node-runtime';
 import type { FromWorker, ToWorker } from './worker-protocol';
 
 // globalThis は Safari 12.1 から。SHIORI が globalThis.engawa と書けるように
@@ -80,13 +81,79 @@ const host = {
 };
 (self as unknown as { engawa: typeof host }).engawa = host;
 
+/** SSTP の答えを待っているもの (Node.js のプログラムの SSTP over HTTP) */
+const sstpWaiting = new Map<number, (response: string) => void>();
+let sstpSeq = 0;
+
+/**
+ * SHIOLINK で動かす Node.js のプログラムを、SHIORI と同じ形にする。
+ * 要求は「*S:番号」の後に送り、プログラムが「*S:番号」を返した後の、空行までを応答とする
+ */
+function nodeShiori(argv: string[]): ShioriModule {
+  let pending: { echo: string; buf: string; resolve(text: string): void } | undefined;
+  const node = startNode(
+    {
+      files,
+      stdout: (t) => {
+        if (!pending) return;
+        pending.buf += t;
+        let b = pending.buf;
+        if (b.startsWith(pending.echo)) b = b.slice(pending.echo.length);
+        else if (pending.echo.startsWith(b)) return;
+        const end = b.indexOf('\r\n\r\n');
+        if (end < 0) return;
+        const done = pending;
+        pending = undefined;
+        done.resolve(b.slice(0, end + 4));
+      },
+      stderr: (t) => ctx.postMessage({ type: 'log', message: t.trimEnd() }),
+      write: (path, data) => ctx.postMessage({ type: 'write', path, data }),
+      sstp: (request) =>
+        new Promise((resolve) => {
+          const id = ++sstpSeq;
+          sstpWaiting.set(id, resolve);
+          ctx.postMessage({ type: 'sstp', id, request });
+        }),
+    },
+    argv,
+    { globals: true },
+  );
+  let seq = 0;
+  return {
+    load(dir) {
+      node.stdin(`*L:/${dir}\r\n`);
+    },
+    request(text) {
+      const id = `${++seq}`;
+      return new Promise((resolve) => {
+        pending = { echo: `*S:${id}\r\n`, buf: '', resolve };
+        node.stdin(`*S:${id}\r\n${text.endsWith('\r\n\r\n') ? text : `${text.replace(/(\r\n)*$/, '')}\r\n\r\n`}`);
+      });
+    },
+    unload() {
+      node.stdin('*U:\r\n');
+    },
+  };
+}
+
 ctx.onmessage = async (e) => {
   const msg = e.data;
+  if (msg.type === 'sstp-response') {
+    sstpWaiting.get(msg.id)?.(msg.response);
+    sstpWaiting.delete(msg.id);
+    return;
+  }
   try {
     let value: string | undefined;
     switch (msg.type) {
       case 'load': {
         for (const [p, d] of msg.files) files.set(p, d);
+        if (msg.node) {
+          const mod = nodeShiori(msg.node.argv);
+          await mod.load?.('');
+          shiori = mod;
+          break;
+        }
         const mod = (await importModule(msg.entry)) as ShioriModule;
         if (typeof mod.request !== 'function') throw new Error(`${msg.entry} does not export request()`);
         // load() が終わるまでは request を受け付けない

@@ -142,6 +142,7 @@ export class GhostManager implements GhostEnv {
       current: () => this.current,
       installed: () => this.packages,
       log: (name, text) => this.logPlugin(name, text),
+      sstp: (request) => this.sstp(request, true),
     });
   }
 

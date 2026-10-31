@@ -92,6 +92,9 @@ const RULES: Rule[] = [
 ];
 
 
+/** WebAssembly にしていない SHIORI の DLL (灯・蒼空・.NET・PowerShell、SHIOLINK で別のプログラムを呼ぶもの) */
+const OTHER_ENGINES = ['akari.dll', 'aosora.dll', 'dnproxy.dll', 'powershiori.dll', 'shiolink.dll'];
+
 /**
  * ゴーストの SHIORI が WebAssembly 版のどれに当たるか。
  * 同梱の DLL があればその中身の文字列で (shiori.dll などに名前を変えてあっても分かる)、無ければ DLL の名前、
@@ -99,6 +102,9 @@ const RULES: Rule[] = [
  */
 export function detectNativeEngine(dllName: string, files: FileTree): NativeEngine | undefined {
   const name = dllName.toLowerCase();
+  // WebAssembly にできない SHIORI と分かっている DLL なら、設定ファイルで当て推量しない
+  // (灯のプラグインが YAYA as SAORI の yaya.txt を持っているときに、YAYA として動かしてしまわないように)
+  if (OTHER_ENGINES.includes(name.replace(/^.*[\\/]/, ''))) return undefined;
   const dll = files.get(`ghost/master/${dllName}`);
   const rule =
     (dll &&

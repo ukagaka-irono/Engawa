@@ -13,6 +13,8 @@ export interface PluginHooks {
   onWrite(path: string, data: Uint8Array): void;
   onLog(message: string): void;
   onSaori(effect: SaoriEffect): void;
+  /** プラグインがベースウェアに SSTP を送った */
+  onSstp(request: string): Promise<string>;
 }
 
 /**
@@ -71,6 +73,7 @@ export class Plugin {
       },
       onLog: (m) => this.hooks.onLog(m),
       onSaori: (effect) => this.hooks.onSaori(effect),
+      onSstp: (request) => this.hooks.onSstp(request),
     });
     if (shiori instanceof UnsupportedShiori) {
       // PLUGIN/1.0 (getversion・notify・configure を持つ、何か・SSP の昔のもの。FreeMem など) は、どれも Windows の DLL のまま
@@ -85,9 +88,12 @@ export class Plugin {
     }
     this.shiori = shiori;
     this.runnable = true;
-    // version には Value で版を答える (Charset を付ければ、以後の要求の文字コードになる)
-    const res = await this.request({ method: 'GET', id: 'version' });
-    this.version = res?.value ?? '';
+    // version には Value で版を答える (Charset を付ければ、以後の要求の文字コードになる)。
+    // 古い YAYA as PLUGIN のひな形は Script で答える。また、最初の要求で Charset が辞書と違うと
+    // 応答の代わりに「1」を返すことがある (YAYA のひな形の SETSETTING) ので、そのときは聞き直す
+    let res = await this.request({ method: 'GET', id: 'version' });
+    if (!res || res.status === 500) res = await this.request({ method: 'GET', id: 'version' });
+    this.version = res?.value ?? res?.script ?? '';
     return undefined;
   }
 

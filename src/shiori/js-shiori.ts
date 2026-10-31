@@ -12,10 +12,12 @@ import { REQUEST_TIMEOUT_MS, WorkerShiori } from './worker-shiori';
  * data: の Worker を起こせないブラウザでは、これまでどおり blob: から起こす。
  */
 export class JsShiori extends WorkerShiori implements Shiori {
+  /** node があれば、SHIOLINK で Node.js のプログラムとして動かす (argv はスクリプトと引数。node-runtime.ts) */
   constructor(
     private readonly files: FileTree,
     readonly name: string,
     hooks: ShioriHooks,
+    private readonly node?: { argv: string[] },
   ) {
     super(hooks);
   }
@@ -23,9 +25,11 @@ export class JsShiori extends WorkerShiori implements Shiori {
   async load(): Promise<void> {
     // Worker は Blob として埋め込む (file:// で開いた index.html からでも起動できるように)
     const master = this.files.sub('ghost/master');
+    // Node.js のプログラムには、同梱の node.exe や DLL は要らない (大きいので Worker に写さない)
+    const entries = [...master.entries()].filter(([p]) => !this.node || !/\.(exe|dll)$/i.test(p));
     const url = await isolatedWorkerUrl();
     if (!url) console.warn('[engawa] JavaScript の SHIORI を、オリジンを持たない Worker で動かせません (このページと同じオリジンで動かします)');
-    return this.start(url ? new Worker(url, { name: this.name }) : new ShioriWorker(), { type: 'load', files: [...master.entries()], entry: this.name, dir: 'ghost/master/' } as never);
+    return this.start(url ? new Worker(url, { name: this.name }) : new ShioriWorker(), { type: 'load', files: entries, entry: this.name, dir: 'ghost/master/', node: this.node } as never);
   }
 
   async request(text: string): Promise<string> {
