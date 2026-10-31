@@ -79,4 +79,12 @@ describe('tokenize', () => {
   it('ignores raw newlines in scripts', () => {
     expect(tags('a\r\nb')).toEqual([['text', 'ab']]);
   });
+
+  it('reads %lastobjectname and %* (ukadoc の環境変数)', () => {
+    expect(tags('%lastobjectname%*x')).toEqual([
+      ['env', 'lastobjectname'],
+      ['env', '*'],
+      ['text', 'x'],
+    ]);
+  });
 });

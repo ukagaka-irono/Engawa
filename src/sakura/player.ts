@@ -110,9 +110,10 @@ export function parseColor(args: string[]): string | undefined | null {
   return null;
 }
 
+/** \_u・\_m・\&[#…] の文字コード。Unicode に無い値 (小数・0x110000 以上など) は何も出さない */
 function parseCode(v: string | undefined): string {
   const n = Number(v?.trim());
-  return Number.isFinite(n) && n > 0 ? String.fromCodePoint(n) : '';
+  return Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
 }
 
 /** \n の引数 (half / パーセント) を行送り量にする */
@@ -291,240 +292,245 @@ export class ScriptPlayer {
     for (let ti = 0; ti < tokens.length; ti++) {
       const t = tokens[ti];
       if (!alive()) break;
-      if (t.type === 'text') {
-        await out(t.text);
-        continue;
-      }
-      if (t.type === 'env') {
-        // %* は \![*] と同じ
-        if (t.name === '*') balloonOf(scope).marker();
-        else await out(host.envVar(t.name));
-        continue;
-      }
-      const a = t.args;
-      switch (t.name) {
-        case '0':
-        case 'h':
-          scope = 0;
-          break;
-        case '1':
-        case 'u':
-          scope = 1;
-          break;
-        case 'p':
-          scope = Math.max(0, Number(a[0]) || 0);
-          break;
-        case 's':
-          await host.setSurface(scope, a[0] ?? '0');
-          break;
-        case 'i':
-          host.playAnimation(scope, Number(a[0]));
-          if (a[1]?.trim() === 'wait') await this.cancellable(host.waitAnimation(scope, Number(a[0])));
-          break;
-        case 'b':
-          if (Number(a[0]) === -1) host.hideBalloon(scope);
-          else host.setBalloonId(scope, Number(a[0]) || 0);
-          break;
-        case 'n': {
-          const ratio = newlineRatio(a.join(',').trim());
-          for (const sc of sync ?? [scope]) host.balloon(sc).newline(ratio);
-          link = null;
-          break;
+      try {
+        if (t.type === 'text') {
+          await out(t.text);
+          continue;
         }
-        case '_n':
-          // 次の \_n まで自動で折り返さない
-          font = { ...font, noWrap: !font.noWrap || undefined };
-          break;
-        case 'w':
-          await this.wait(Number(a[0]) * 50);
-          break;
-        case '_w':
-          await this.wait(Number(a[0]) || 0);
-          break;
-        case '__w':
-          if (a[0] === 'clear') start = performance.now();
-          else if (a[0] === 'animation') await this.cancellable(host.waitAnimation(scope, Number(a[1])));
-          else await this.wait(start + (Number(a[0]) || 0) - performance.now());
-          break;
-        case '_q':
-          this.quickSection = !this.quickSection;
-          break;
-        case '_s':
-          sync = sync ? null : a.length ? a.map(Number) : [0, 1];
-          break;
-        case 'e':
-          host.yenE();
-          return finish();
-        case 'z':
-          // [旧仕様] 選択肢のあるスクリプトの \e
-          host.yenE();
-          return finish();
-        case '-':
-          result.exited = true;
-          return finish();
-        case '*':
-          result.noTimeout = true;
-          break;
-        case 'c': {
-          const b = host.balloon(scope);
-          const startAt = a[2] !== undefined && a[2].trim() !== '' ? Number(a[2]) : undefined;
-          if (a[0] === 'char') b.deleteChars(Number(a[1]) || 1, startAt);
-          else if (a[0] === 'line') b.deleteLines(Number(a[1]) || 1, startAt);
-          else b.clear();
-          break;
+        if (t.type === 'env') {
+          // %* は \![*] と同じ
+          if (t.name === '*') balloonOf(scope).marker();
+          else await out(host.envVar(t.name));
+          continue;
         }
-        case 'x':
-          speakNow();
-          this.skipping = false;
-          this.waitingClick = true;
-          for (const sc of used) host.balloon(sc).setWaitingClick(true);
-          await new Promise<void>((resolve) => (this.clickWaiter = resolve));
-          this.clickWaiter = undefined;
-          this.waitingClick = false;
-          for (const sc of used) host.balloon(sc).setWaitingClick(false);
-          if (!alive()) break;
-          // \__w の基準は \x からも数える
-          start = performance.now();
-          if (a[0] !== 'noclear') {
-            // クリック後はバルーンを消し、スコープは \0、\f の文字装飾も解除される
-            for (const sc of used) host.balloon(sc).clear();
+        const a = t.args;
+        switch (t.name) {
+          case '0':
+          case 'h':
             scope = 0;
-            font = {};
+            break;
+          case '1':
+          case 'u':
+            scope = 1;
+            break;
+          case 'p':
+            scope = Math.max(0, Number(a[0]) || 0);
+            break;
+          case 's':
+            await host.setSurface(scope, a[0] ?? '0');
+            break;
+          case 'i':
+            host.playAnimation(scope, Number(a[0]));
+            if (a[1]?.trim() === 'wait') await this.cancellable(host.waitAnimation(scope, Number(a[0])));
+            break;
+          case 'b':
+            if (Number(a[0]) === -1) host.hideBalloon(scope);
+            else host.setBalloonId(scope, Number(a[0]) || 0);
+            break;
+          case 'n': {
+            const ratio = newlineRatio(a.join(',').trim());
+            for (const sc of sync ?? [scope]) host.balloon(sc).newline(ratio);
             link = null;
+            break;
           }
-          break;
-        case 't':
-          // タイムクリティカルセクション (\e まで、マウスのイベントを送らない)
-          timeCritical = true;
-          host.setTimeCritical(true);
-          break;
-        case '4':
-        case '5':
-          await host.moveScope(scope, t.name === '5');
-          break;
-        case '+':
-          await host.command(['change', 'ghost', 'random'], scope);
-          break;
-        case '_+':
-          await host.command(['change', 'ghost', 'sequential'], scope);
-          break;
-        case 'v':
-          await host.command(['set', 'windowstate', 'stayontop'], scope);
-          break;
-        case 'a':
-          await host.command(['raise', 'OnAITalk'], scope);
-          break;
-        case '__t':
-          await host.command(['open', 'teachbox'], scope);
-          break;
-        case '__v': {
-          // \__v[disable] / \__v[alternate,読み] … \__v
-          const opt = a[0]?.trim().toLowerCase();
-          if (a.length === 0 || !opt) {
-            if (voice?.alternate) spoken += voice.alternate;
-            voice = null;
-          } else if (opt === 'disable') {
-            voice = { disabled: true };
-          } else if (opt === 'alternate') {
-            voice = { disabled: false, alternate: a.slice(1).join(',') };
+          case '_n':
+            // 次の \_n まで自動で折り返さない
+            font = { ...font, noWrap: !font.noWrap || undefined };
+            break;
+          case 'w':
+            await this.wait(Number(a[0]) * 50);
+            break;
+          case '_w':
+            await this.wait(Number(a[0]) || 0);
+            break;
+          case '__w':
+            if (a[0] === 'clear') start = performance.now();
+            else if (a[0] === 'animation') await this.cancellable(host.waitAnimation(scope, Number(a[1])));
+            else await this.wait(start + (Number(a[0]) || 0) - performance.now());
+            break;
+          case '_q':
+            this.quickSection = !this.quickSection;
+            break;
+          case '_s':
+            sync = sync ? null : a.length ? a.map(Number) : [0, 1];
+            break;
+          case 'e':
+            host.yenE();
+            return finish();
+          case 'z':
+            // [旧仕様] 選択肢のあるスクリプトの \e
+            host.yenE();
+            return finish();
+          case '-':
+            result.exited = true;
+            return finish();
+          case '*':
+            result.noTimeout = true;
+            break;
+          case 'c': {
+            const b = host.balloon(scope);
+            const startAt = a[2] !== undefined && a[2].trim() !== '' ? Number(a[2]) : undefined;
+            if (a[0] === 'char') b.deleteChars(Number(a[1]) || 1, startAt);
+            else if (a[0] === 'line') b.deleteLines(Number(a[1]) || 1, startAt);
+            else b.clear();
+            break;
           }
-          break;
-        }
-        case 'q': {
-          const [title = '', id = '', ...refs] = a;
-          if (!title.trim() && !id) break;
-          balloonOf(scope).choice(
-            title,
-            font,
-            () => host.selectChoice(title, id, refs),
-            (on) => host.hoverLink?.('choice', on, title, id, refs),
-          );
-          break;
-        }
-        case '__q':
-          if (a.length === 0) {
-            host.balloon(scope).endLink();
-            link = null;
-          } else {
-            const [id = '', ...refs] = a;
-            const ctx = { title: '' };
-            link = ctx;
-            balloonOf(scope).beginLink('choice', () => host.selectChoice(ctx.title, id, refs), font, (on) => host.hoverLink?.('choice', on, ctx.title, id, refs));
-          }
-          break;
-        case '_a':
-          if (a.length === 0) {
-            host.balloon(scope).endLink();
-            link = null;
-          } else {
-            const [id = '', ...refs] = a;
-            const ctx = { title: '' };
-            link = ctx;
-            balloonOf(scope).beginLink('anchor', () => host.selectAnchor(ctx.title, id, refs), font, (on) => host.hoverLink?.('anchor', on, ctx.title, id, refs));
-          }
-          break;
-        case 'f': {
-          const align = this.alignOf(a);
-          if (align) for (const sc of sync ?? [scope]) balloonOf(sc).setAlign(align);
-          else font = this.applyFont(font, a);
-          break;
-        }
-        case '_l':
-          balloonOf(scope).locate(a[0], a[1]);
-          break;
-        case '_b': {
-          const inline = a[1]?.trim().toLowerCase() === 'inline';
-          const opts = inlineImageOptions(a.slice(inline ? 2 : 3));
-          const img = await host.imageUrl(a[0] ?? '', opts);
-          if (!img || !alive()) break;
-          const size = scaledSize(img.width, img.height, opts.scaling);
-          balloonOf(scope).image(
-            img.url,
-            inline ? undefined : { x: Number(a[1]) || 0, y: Number(a[2]) || 0, foreground: opts.foreground, fixed: opts.fixed },
-            size,
-          );
-          break;
-        }
-        case '&': {
-          const name = (a[0] ?? '').trim();
-          const ch = name.startsWith('#') ? parseCode(name.startsWith('#x') ? '0' + name.slice(1) : name.slice(1)) : ENTITIES[name];
-          if (ch) await out(ch);
-          break;
-        }
-        case '_u':
-        case '_m':
-          await out(parseCode(a[0]));
-          break;
-        case '!': {
-          const cmd = (a[0] ?? '').trim().toLowerCase();
-          if (cmd === '*') {
-            balloonOf(scope).marker();
-          } else if (cmd === 'embed') {
-            // イベントの結果を、このタグの位置に差し込んで続ける
-            const value = a[1] ? await host.embed(a[1].trim(), a.slice(2)) : undefined;
+          case 'x':
+            speakNow();
+            this.skipping = false;
+            this.waitingClick = true;
+            for (const sc of used) host.balloon(sc).setWaitingClick(true);
+            await new Promise<void>((resolve) => (this.clickWaiter = resolve));
+            this.clickWaiter = undefined;
+            this.waitingClick = false;
+            for (const sc of used) host.balloon(sc).setWaitingClick(false);
             if (!alive()) break;
-            if (value) tokens.splice(ti + 1, 0, ...tokenize(value));
-          } else {
-            await this.command(a, scope);
+            // \__w の基準は \x からも数える
+            start = performance.now();
+            if (a[0] !== 'noclear') {
+              // クリック後はバルーンを消し、スコープは \0、\f の文字装飾も解除される
+              for (const sc of used) host.balloon(sc).clear();
+              scope = 0;
+              font = {};
+              link = null;
+            }
+            break;
+          case 't':
+            // タイムクリティカルセクション (\e まで、マウスのイベントを送らない)
+            timeCritical = true;
+            host.setTimeCritical(true);
+            break;
+          case '4':
+          case '5':
+            await host.moveScope(scope, t.name === '5');
+            break;
+          case '+':
+            await host.command(['change', 'ghost', 'random'], scope);
+            break;
+          case '_+':
+            await host.command(['change', 'ghost', 'sequential'], scope);
+            break;
+          case 'v':
+            await host.command(['set', 'windowstate', 'stayontop'], scope);
+            break;
+          case 'a':
+            await host.command(['raise', 'OnAITalk'], scope);
+            break;
+          case '__t':
+            await host.command(['open', 'teachbox'], scope);
+            break;
+          case '__v': {
+            // \__v[disable] / \__v[alternate,読み] … \__v
+            const opt = a[0]?.trim().toLowerCase();
+            if (a.length === 0 || !opt) {
+              if (voice?.alternate) spoken += voice.alternate;
+              voice = null;
+            } else if (opt === 'disable') {
+              voice = { disabled: true };
+            } else if (opt === 'alternate') {
+              voice = { disabled: false, alternate: a.slice(1).join(',') };
+            }
+            break;
           }
-          break;
+          case 'q': {
+            const [title = '', id = '', ...refs] = a;
+            if (!title.trim() && !id) break;
+            balloonOf(scope).choice(
+              title,
+              font,
+              () => host.selectChoice(title, id, refs),
+              (on) => host.hoverLink?.('choice', on, title, id, refs),
+            );
+            break;
+          }
+          case '__q':
+            if (a.length === 0) {
+              host.balloon(scope).endLink();
+              link = null;
+            } else {
+              const [id = '', ...refs] = a;
+              const ctx = { title: '' };
+              link = ctx;
+              balloonOf(scope).beginLink('choice', () => host.selectChoice(ctx.title, id, refs), font, (on) => host.hoverLink?.('choice', on, ctx.title, id, refs));
+            }
+            break;
+          case '_a':
+            if (a.length === 0) {
+              host.balloon(scope).endLink();
+              link = null;
+            } else {
+              const [id = '', ...refs] = a;
+              const ctx = { title: '' };
+              link = ctx;
+              balloonOf(scope).beginLink('anchor', () => host.selectAnchor(ctx.title, id, refs), font, (on) => host.hoverLink?.('anchor', on, ctx.title, id, refs));
+            }
+            break;
+          case 'f': {
+            const align = this.alignOf(a);
+            if (align) for (const sc of sync ?? [scope]) balloonOf(sc).setAlign(align);
+            else font = this.applyFont(font, a);
+            break;
+          }
+          case '_l':
+            balloonOf(scope).locate(a[0], a[1]);
+            break;
+          case '_b': {
+            const inline = a[1]?.trim().toLowerCase() === 'inline';
+            const opts = inlineImageOptions(a.slice(inline ? 2 : 3));
+            const img = await host.imageUrl(a[0] ?? '', opts);
+            if (!img || !alive()) break;
+            const size = scaledSize(img.width, img.height, opts.scaling);
+            balloonOf(scope).image(
+              img.url,
+              inline ? undefined : { x: Number(a[1]) || 0, y: Number(a[2]) || 0, foreground: opts.foreground, fixed: opts.fixed },
+              size,
+            );
+            break;
+          }
+          case '&': {
+            const name = (a[0] ?? '').trim();
+            const ch = name.startsWith('#') ? parseCode(name.startsWith('#x') ? '0' + name.slice(1) : name.slice(1)) : ENTITIES[name];
+            if (ch) await out(ch);
+            break;
+          }
+          case '_u':
+          case '_m':
+            await out(parseCode(a[0]));
+            break;
+          case '!': {
+            const cmd = (a[0] ?? '').trim().toLowerCase();
+            if (cmd === '*') {
+              balloonOf(scope).marker();
+            } else if (cmd === 'embed') {
+              // イベントの結果を、このタグの位置に差し込んで続ける
+              const value = a[1] ? await host.embed(a[1].trim(), a.slice(2)) : undefined;
+              if (!alive()) break;
+              if (value) tokens.splice(ti + 1, 0, ...tokenize(value));
+            } else {
+              await this.command(a, scope);
+            }
+            break;
+          }
+          case '8':
+          case '_v':
+            host.playSound(a[0] ?? '');
+            break;
+          case '_V':
+            await this.cancellable(host.waitSound());
+            break;
+          case 'j':
+            if (a[0]) host.openUrl(a[0].trim());
+            break;
+          case '__c':
+            host.openCommunicate();
+            break;
+          default:
+            // \6 \7 (時計合わせ) \m (ウインドウメッセージ) \C などは読み飛ばす
+            break;
         }
-        case '8':
-        case '_v':
-          host.playSound(a[0] ?? '');
-          break;
-        case '_V':
-          await this.cancellable(host.waitSound());
-          break;
-        case 'j':
-          if (a[0]) host.openUrl(a[0].trim());
-          break;
-        case '__c':
-          host.openCommunicate();
-          break;
-        default:
-          // \6 \7 (時計合わせ) \m (ウインドウメッセージ) \C などは読み飛ばす
-          break;
+      } catch (e) {
+        // 1つのタグで失敗しても、再生中のまま止まらないよう次へ進む
+        console.warn('[sakura]', t, e);
       }
     }
     if (!alive()) {

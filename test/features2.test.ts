@@ -107,6 +107,28 @@ describe('ネットワーク更新 (シェル・バルーン、delete.txt、結�
     expect(updateResultRefs([{ name: 'x', target: 'ghost', result: { ok: false, changed: [], reason: 'md5 miss', file: 'a.dic' } }], false)).toEqual(['ghost\x01NG\x01md5 miss\x01a.dic']);
   });
 
+  it('delete.txt にフォルダが書かれていても、更新の一覧にあるファイル (今回取ってきたもの) は消さない', async () => {
+    const fresh = bytes('新しい辞書');
+    const del = bytes('dic\\\r\n');
+    const list = bytes(`dic/new.dic\x01${md5(fresh)}\x01\r\ndelete.txt\x01${md5(del)}\x01\r\n`);
+    const server: Record<string, Uint8Array> = { 'updates2.dau': list, 'new.dic': fresh, 'delete.txt': del };
+    vi.stubGlobal('fetch', async (url: string) => {
+      const body = server[decodeURIComponent(url.split('/').pop()!)];
+      return body ? new Response(body as BodyInit) : new Response('', { status: 404 });
+    });
+    const files = new FileTree([['dic/old.dic', bytes('古い')]]);
+    const removed: [string[], string[]][] = [];
+    await networkUpdate(
+      'https://example.com/',
+      files,
+      { raise: async () => {}, write: async () => {}, remove: async (paths, keep) => void removed.push([paths, keep]) },
+      { target: 'ghost', reason: 'manual', ghostName: 'G', path: 'ghost/g' },
+    );
+    expect(removed).toEqual([[['dic/'], ['dic/new.dic', 'delete.txt']]]);
+    expect(files.has('dic/old.dic')).toBe(false);
+    expect(files.get('dic/new.dic')).toEqual(fresh);
+  });
+
   it('testonly は取ってくるが置き換えない', async () => {
     const newer = bytes('新しい');
     vi.stubGlobal('fetch', async (url: string) => new Response((url.endsWith('updates2.dau') ? bytes(`a.txt\x01${md5(newer)}\x01\r\n`) : newer) as BodyInit));

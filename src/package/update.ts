@@ -1,6 +1,6 @@
 import { md5 } from '../util/md5';
 import { decodeText } from '../util/text';
-import type { FileTree } from '../vfs/files';
+import { normalizePath, type FileTree } from '../vfs/files';
 import { parseDeleteList } from './installer';
 
 /**
@@ -49,7 +49,8 @@ export interface UpdateHooks {
   /** 取り直したファイルを保存する (パッケージのルートからの相対パス) */
   write(path: string, data: Uint8Array): Promise<void>;
   /** delete.txt に書かれたファイルを消す (末尾が / はディレクトリ) */
-  remove?(paths: string[]): Promise<void>;
+  /** keep は消さないもの (更新の一覧にあるファイル) */
+  remove?(paths: string[], keep: string[]): Promise<void>;
 }
 
 export interface UpdateOptions {
@@ -131,7 +132,7 @@ export async function networkUpdate(homeurl: string, files: FileTree, hooks: Upd
     return { ok: true, changed: changed.map((e) => e.path) };
   }
   if (!changed.length) {
-    await removeListed(files, hooks);
+    await removeListed(files, hooks, entries.map((e) => e.path));
     await hooks.raise(`${ev}Complete`, ['none', '', '', target, reason]);
     return { ok: true, changed: [] };
   }
@@ -155,21 +156,25 @@ export async function networkUpdate(homeurl: string, files: FileTree, hooks: Upd
     }
     done.push(e.path);
   }
-  if (!opts.testOnly) await removeListed(files, hooks);
+  if (!opts.testOnly) await removeListed(files, hooks, entries.map((e) => e.path));
   await hooks.raise(`${ev}Complete`, ['changed', done.join(','), '', target, reason]);
   return { ok: true, changed: done };
 }
 
-/** delete.txt に書かれたファイルを消す (更新で一度配ったファイルを取り除くためのもの) */
-async function removeListed(files: FileTree, hooks: UpdateHooks): Promise<void> {
+/**
+ * delete.txt に書かれたファイルを消す (更新で一度配ったファイルを取り除くためのもの)。
+ * 更新の一覧 (keep) にあるファイルは、delete.txt にそのフォルダが書かれていても残す
+ */
+async function removeListed(files: FileTree, hooks: UpdateHooks, keep: string[]): Promise<void> {
   const list = files.get('delete.txt');
   if (!list || !hooks.remove) return;
   const paths = parseDeleteList(list).map((p) => p.replace(/\\/g, '/'));
   if (!paths.length) return;
-  await hooks.remove(paths);
+  await hooks.remove(paths, keep);
+  const kept = new Set(keep.map((p) => normalizePath(p)));
   for (const p of paths) {
-    if (p.endsWith('/')) for (const f of files.list(p.slice(0, -1))) files.delete(f);
-    else files.delete(p);
+    const targets = p.endsWith('/') ? files.list(p.slice(0, -1)) : [normalizePath(p)];
+    for (const f of targets) if (!kept.has(f)) files.delete(f);
   }
 }
 

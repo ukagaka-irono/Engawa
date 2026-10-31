@@ -63,3 +63,28 @@ describe('クイックセクション', () => {
     expect(r.ms).toBeLessThan(250);
   });
 });
+
+describe('失敗するタグ', () => {
+  it('Unicode に無い文字コード (\\_u[1.5]・\\&[#x110000]) は何も出さず、再生中のまま止まらない', async () => {
+    const h = fakeHost(0);
+    let ended = 0;
+    h.host.yenE = () => void ended++;
+    const player = new ScriptPlayer(h.host);
+    const r = await player.play('a\\_u[1.5]b\\&[#x110000]c\\_u[0x41]\\e');
+    expect(h.text.join('')).toBe('abcA');
+    expect(r.aborted).toBe(false);
+    expect(ended).toBe(1);
+    expect(player.playing).toBe(false);
+  });
+
+  it('ゴースト側で失敗した \\![…] は飛ばして続きを再生する', async () => {
+    const h = fakeHost(0);
+    h.host.command = async () => {
+      throw new Error('boom');
+    };
+    const player = new ScriptPlayer(h.host);
+    await player.play('a\\![raise,OnX]b\\e');
+    expect(h.text.join('')).toBe('ab');
+    expect(player.playing).toBe(false);
+  });
+});

@@ -934,7 +934,8 @@ export class Ghost implements PlayerHost {
   async raise(id: string, references: Reference[] = [], opts: RaiseOptions = {}): Promise<string | undefined> {
     if (this.leaving) return undefined;
     const value = await this.request(opts.method ?? 'GET', id, references, opts.headers, opts.secret);
-    if (!value || this.leaving) return undefined;
+    // NOTIFY の返事のスクリプトは再生しない (ukadoc: NOTIFY はゴーストに知らせるだけ)
+    if (!value || this.leaving || opts.method === 'NOTIFY') return undefined;
     if (opts.ifIdle && this.busy) return undefined;
     const played = this.playScript(value, { event: id, refs: references, kinds: opts.kinds, noTranslate: opts.noTranslate });
     if (opts.wait) await played;
@@ -1744,20 +1745,25 @@ export class Ghost implements PlayerHost {
     try {
       this.checkOverlap();
       const idle = Math.floor((Date.now() - this.env.lastInputAt()) / 1000);
-      const refs = [Math.floor((Date.now() - this.bootedAt) / 3_600_000), this.mikire() ? 1 : 0, this.kasanari() ? 1 : 0, this.busy ? 0 : 1, idle];
-      // パッシブモードの間は、時間のイベントでは喋らない
+      // パッシブモード・最小化の間と喋っている間は、時間のイベントでは喋らない。
+      // ukadoc: トーク再生不能な時は Reference3 を 0 にして NOTIFY で送り、返されたスクリプトは無視する
       const quiet = this.passive || this.minimized;
-      await this.raise('OnSecondChange', refs, { ifIdle: true, method: quiet ? 'NOTIFY' : 'GET' });
+      const timeEvent = async (id: string) => {
+        const canTalk = !quiet && !this.busy;
+        const refs = [Math.floor((Date.now() - this.bootedAt) / 3_600_000), this.mikire() ? 1 : 0, this.kasanari() ? 1 : 0, canTalk ? 1 : 0, idle];
+        await this.raise(id, refs, { ifIdle: true, method: canTalk ? 'GET' : 'NOTIFY' });
+      };
+      await timeEvent('OnSecondChange');
       // タイマーのずれで :00 を飛ばしても取りこぼさないよう、分が変わったかで判定する
       const now = new Date();
       if (now.getMinutes() !== this.lastMinute) {
         this.lastMinute = now.getMinutes();
-        await this.raise('OnMinuteChange', refs, { ifIdle: true, method: quiet ? 'NOTIFY' : 'GET' });
+        await timeEvent('OnMinuteChange');
       }
       // 時報: 喋れないときは喋れるようになるまで待つ
       if (now.getHours() !== this.lastHour && !this.busy && !quiet) {
         this.lastHour = now.getHours();
-        await this.raise('OnHourTimeSignal', [refs[0], refs[1], refs[2], 1, idle]);
+        await this.raise('OnHourTimeSignal', [Math.floor((Date.now() - this.bootedAt) / 3_600_000), this.mikire() ? 1 : 0, this.kasanari() ? 1 : 0, 1, idle]);
       }
     } finally {
       this.secondBusy = false;

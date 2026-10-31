@@ -7,7 +7,7 @@ const db = vi.hoisted(() => ({
   metas: new Map<string, PackageMeta>(),
   puts: [] as { meta: PackageMeta; paths: string[]; prefix: string; refresh?: Refresh }[],
   stored: new Map<string, Uint8Array>(),
-  deleted: [] as { key: string; paths: string[] }[],
+  deleted: [] as { key: string; paths: string[]; keep: string[] }[],
 }));
 vi.mock('../src/vfs/storage', () => ({
   getPackage: async (key: string) => db.metas.get(key),
@@ -16,7 +16,7 @@ vi.mock('../src/vfs/storage', () => ({
     db.puts.push({ meta, paths: [...files.entries()].map(([p]) => prefix + p).sort(), prefix, refresh });
   },
   readPackageFile: async (key: string, path: string) => db.stored.get(`${key}:${path}`),
-  deletePackageFiles: async (key: string, paths: string[]) => void db.deleted.push({ key, paths }),
+  deletePackageFiles: async (key: string, paths: string[], keep: Iterable<string> = []) => void db.deleted.push({ key, paths, keep: [...keep].sort() }),
 }));
 
 const { installFiles, InstallError } = await import('../src/package/installer');
@@ -179,7 +179,14 @@ describe('installFiles', () => {
       tree({ 'install.txt': 'type,ghost\r\ndirectory,emily', 'ghost/master/descript.txt': 'name,エミリ', 'delete.txt': 'ghost\\master\\old.dic\r\nghost\\master\\descript.txt\r\nghost\\master\\obsolete\\\r\n..\\evil.txt' }),
       'emily.nar',
     );
-    expect(db.deleted).toEqual([{ key: 'ghost/emily', paths: ['ghost\\master\\old.dic', 'ghost\\master\\obsolete\\'] }]);
+    // 消さないもの (アーカイブが持ってきたファイル) は keep として渡し、storage がフォルダの中でも残す
+    expect(db.deleted).toEqual([
+      {
+        key: 'ghost/emily',
+        paths: ['ghost\\master\\old.dic', 'ghost\\master\\descript.txt', 'ghost\\master\\obsolete\\'],
+        keep: ['delete.txt', 'ghost/master/descript.txt'],
+      },
+    ]);
   });
 
   it('installs a supplement into the accepting ghost at its root', async () => {

@@ -112,12 +112,19 @@ ctx.onmessage = async (e) => {
         original.set(msg.path, msg.data);
         break;
       case 'unload':
-        mod?._unload();
-        // SHIORI が閉じ忘れた SAORI も unload する
-        saori?.unloadAll();
-        flush();
-        mod = undefined;
-        saori = undefined;
+        try {
+          mod?._unload();
+        } finally {
+          // unload で失敗しても、SAORI を閉じてセーブデータを書き戻す
+          try {
+            // SHIORI が閉じ忘れた SAORI も unload する
+            saori?.unloadAll();
+          } finally {
+            flush();
+            mod = undefined;
+            saori = undefined;
+          }
+        }
         break;
     }
     ctx.postMessage({ id: msg.id, type: 'result', ok: true, value }, value ? [value.buffer] : []);

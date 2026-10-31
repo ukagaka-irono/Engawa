@@ -266,12 +266,14 @@ export async function writePackageFile(key: string, path: string, data: Uint8Arr
 }
 
 /** パッケージの中のファイルを消す (delete.txt)。末尾が / のものはそのディレクトリの中をすべて */
-export async function deletePackageFiles(key: string, paths: string[]): Promise<void> {
+export async function deletePackageFiles(key: string, paths: string[], keep: Iterable<string> = []): Promise<void> {
+  // keep は消さないもの (同じインストール・更新で入れたファイル。delete.txt にフォルダが書かれていても残す)
+  const kept = new Set([...keep].map((p) => normalizePath(p)));
   const exact = new Set<string>();
   const dirs: string[] = [];
   for (const raw of paths) {
     const p = normalizePath(raw.replace(/\\/g, '/'));
-    if (!p) continue;
+    if (!p || kept.has(p)) continue;
     if (/[\\/]$/.test(raw)) dirs.push(`${p}/`);
     else exact.add(p);
   }
@@ -279,13 +281,19 @@ export async function deletePackageFiles(key: string, paths: string[]): Promise<
   if (await inMemory()) {
     const stored = memory.files.get(key);
     if (!stored) return;
-    for (const path of [...stored.keys()]) if (exact.has(path) || dirs.some((d) => path.startsWith(d))) stored.delete(path);
+    for (const path of [...stored.keys()]) if (exact.has(path) || (dirs.some((d) => path.startsWith(d)) && !kept.has(path))) stored.delete(path);
     return;
   }
   return run(['files'], 'readwrite', async (tx) => {
     const store = tx.objectStore('files');
     for (const p of exact) store.delete([key, p]);
-    for (const d of dirs) store.delete(prefixRange(key, d));
+    for (const d of dirs) {
+      if (!kept.size) {
+        store.delete(prefixRange(key, d));
+        continue;
+      }
+      for (const k of await result(store.getAllKeys(prefixRange(key, d)))) if (!kept.has((k as [string, string])[1])) store.delete(k);
+    }
   });
 }
 

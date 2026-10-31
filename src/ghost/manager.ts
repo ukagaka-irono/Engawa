@@ -454,7 +454,7 @@ export class GhostManager implements GhostEnv {
         {
           raise: (id, refs) => ghost.raise(id, refs, { wait: true }),
           write: (path, data) => writePackageFile(key, prefix + path, data),
-          remove: (paths) => deletePackageFiles(key, paths.map((p) => prefix + p)),
+          remove: (paths, keep) => deletePackageFiles(key, paths.map((p) => prefix + p), keep.map((p) => prefix + p)),
         },
         { target: kind, reason: opts.reason, checkOnly: opts.checkOnly, testOnly: opts.testOnly, recovery: opts.recovery, other: kind !== 'ghost', ghostName: ghost.name, path: ghost.key },
       );

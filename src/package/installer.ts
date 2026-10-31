@@ -134,9 +134,12 @@ export function parseDeleteList(data: Uint8Array): string[] {
 async function applyDeleteList(key: string, files: FileTree, prefix = ''): Promise<void> {
   const data = files.get('delete.txt') ?? (await readPackageFile(key, `${prefix}delete.txt`));
   if (!data) return;
-  // 新しく入れたファイルは消さない
-  const list = parseDeleteList(data).filter((p) => !files.has(normalizePath(p.replace(/\\/g, '/'))));
-  await deletePackageFiles(key, list.map((p) => `${prefix}${p}`));
+  // 新しく入れたファイルは消さない (フォルダが書かれていても、その中の新しいファイルは残す)
+  await deletePackageFiles(
+    key,
+    parseDeleteList(data).map((p) => `${prefix}${p}`),
+    files.list().map((p) => `${prefix}${p}`),
+  );
 }
 
 /** 同梱できる種類 (install.txt の「種類.directory」の種類と、保存するパッケージの種類) */
