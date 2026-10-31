@@ -63,7 +63,7 @@ Internet Explorer には対応していません。
 
 | 分野 | 対応しているもの |
 |---|---|
-| パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement / package、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory`・`plugin.directory` など番号付きを含む同梱)、plugin・headline・calendar・language は保存だけ (動かない)、`delete.txt`、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む)、URL からのインストール (`\![execute,install,url]`・URL のドロップ)、インストール後の readme、ネットワーク更新 (`updates2.dau` / `updates.txt`。シェル・バルーンの OnUpdateOther…、`\![updateother,--balloon=…]`、checkonly・testonly・recovery、結果のまとめの OnUpdateResult(Ex)。配布先が CORS を許しているときだけ)、ゴーストキャッシュ (切り替えたゴーストを2体まで取っておく)、消滅 (`\![vanishbymyself]`・メニューの消滅指示) |
+| パッケージ | .nar / .zip / フォルダ、`install.txt` (ghost / balloon / shell / supplement / package、`accept`、`refresh` / `refreshundeletemask`、`balloon.directory`・`plugin.directory` など番号付きを含む同梱)、plugin (下の「プラグインについて」)、headline・calendar・language は保存だけ (動かない)、`delete.txt`、Shift_JIS / UTF-8 の自動判定 (zip の UTF-8 フラグと Unicode Path 拡張を含む)、URL からのインストール (`\![execute,install,url]`・URL のドロップ)、インストール後の readme、ネットワーク更新 (`updates2.dau` / `updates.txt`。シェル・バルーンの OnUpdateOther…、`\![updateother,--balloon=…]`、checkonly・testonly・recovery、結果のまとめの OnUpdateResult(Ex)。配布先が CORS を許しているときだけ)、ゴーストキャッシュ (切り替えたゴーストを2体まで取っておく)、消滅 (`\![vanishbymyself]`・メニューの消滅指示) |
 | SHIORI | SHIORI/3.0 (GET / NOTIFY)、SHIORI/2.x (読み替え)、DLL 製 SHIORI を WebAssembly にしたもの (下記)、JavaScript 製 SHIORI (Web Worker 内で実行)、セーブデータの書き込み |
 | SAORI | SAORI/1.0。JavaScript で作り直したものと、WebAssembly にしたもの (下記)。どの SHIORI からも呼べる |
 | シェル | `surfaces.txt` / `surfaces*.txt` (新旧書式、MATERIA 式の見出し、`surface.append`、範囲指定、数字と名前のエイリアス)、element 合成 (element0 が無ければ surfaceN.png の上に重ねる、`--option` の切り抜き・拡大・透明度)、合成メソッド (multiply・screen・overlay・add など)、`.pna` / `use_self_alpha` (1・true・full) / 左上色の透過、collision / collisionex (region を含む)、`collision-sort` / `animation-sort`、cursor・tooltips ブレス、`point.basepos`、`balloon.offset*` (サーフェスごと・左右別)、`seriko.alignmenttodesktop`・`seriko.zorder`・`seriko.sticky-window`・`balloon.dontmove`・`sakura.defaultx` など既定の位置 |
@@ -100,7 +100,7 @@ Internet Explorer には対応していません。
 
 できないこと:
 
-- **下の表に無い SAORI と、プラグイン** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
+- **下の表に無い SAORI** (DLL や外部のプログラム) は読めません。呼ぶと失敗として返ります。
 - **.NET (dnproxy)・PowerShell (powershiori) の SHIORI** は、ブラウザで動く実行環境が無いので動きません。
 - **蒼空 (aosora)** は、ソースの使い方が個人利用に限られている (まだライセンスが決まっていない) ので組み込んでいません。
 - **ソースが公開されていない SHIORI** (文 ver.1〜4・美坂・偽栞・此栞・忍・似非shiori・ひとみ。・翡翠・結奈・真絵・透理・灯 など、主に 2001〜2005 年ごろのもの) は、WebAssembly にできないので動きません。
@@ -135,8 +135,9 @@ WebAssembly にしたもの (ソースからビルドして `index.html` に組�
 | timebkn (時刻・旧暦) | timebkn.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
 | XAORIC (XPath) | xaoric.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
 | sqlori (SQLite) | sqlori.dll | [ukatech/csaori](https://github.com/ukatech/csaori) |
-| MahjongUtil (麻雀) | MahjongUtil.dll | [nikolat/MahjongUtil](https://github.com/nikolat/MahjongUtil) |
+| MahjongUtil (麻雀) | MahjongUtil.dll・MahjongUtilCustom.dll | [nikolat/MahjongUtil](https://github.com/nikolat/MahjongUtil) |
 | mahjong_nodoka (麻雀) | nodoka.dll | [Tatakinov/mahjong_nodoka](https://github.com/Tatakinov/mahjong_nodoka) |
+| connect6_mio (六目並べ) | mio.dll | [Tatakinov/connect6_mio](https://github.com/Tatakinov/connect6_mio) |
 | TexasHoldemUtil (ポーカー) | TexasHoldemUtil.dll | [Tatakinov/TexasHoldemUtil](https://github.com/Tatakinov/TexasHoldemUtil) |
 | saori_budoux (文の区切り) | budoux.dll | [Tatakinov/saori_budoux](https://github.com/Tatakinov/saori_budoux) |
 | saori-calcs (四則演算) | calcs.dll | [tukinami/saori-calcs](https://github.com/tukinami/saori-calcs) |
@@ -170,7 +171,13 @@ JavaScript で作り直したもの (ブラウザでできることで答えま�
 | AqTalkSaori | AqTalkSaori.dll | AquesTalk の代わりにブラウザの音声合成で読む (WAV は作れない) |
 | MakotoUtil | MakotoUtil.dll | SAORI は待てないので、キーは押されていない・入力ボックスは初期値・メッセージボックスは OK と答える |
 | nullsaori・SaoriTest・example (ninix-saori) | nullsaori.dll など | 元と同じ答え |
+| mciaudio・mciaudior | mciaudio.dll・mciaudior.dll | 1曲を読み込んで鳴らす (load・play (一時停止と再開)・loop・stop)。mciaudior の construction 7 からの版は、鳴り終わり・繰り返しを OnMAAPlayFinish・OnMAAPlayLoop で知らせる (DLL の版で決める)。MIDI は鳴らない |
+| httpc | httpc.dll | 里々の httpc と同じ引数 (先頭の euc・jis・sjis・utf8・erase_tag・translate_tag、URL・保存・前と後で挟んだところ、bg と OnHttpcNotify)。CORS を許すところだけ |
+| textcopy・houchi・choice・os_detect | それぞれの DLL | クリップボードに写す・操作していない間 1分ごとに OnHouchi・引数から1つ選ぶ・OS の名前 (Windows と答える) |
+| gomi・findwin・cpuusage・HandUtil・process (Tatakinov)・hotkey・screencatch | それぞれの DLL | ごみ箱・ほかのアプリの窓・CPU の負荷・窓のハンドル・子プロセス・全体のホットキー・画面の取り込みは、ブラウザに無いので、元の SAORI の「無い・空・無効・失敗」の答えを返す |
 | Windows の機能そのもの (SetCursorPos・Osuwari・screenshot・set_wall_paper・steam_api・tsvnexec・cmdrunner・imoutomessenger・gainer・effect_wrapper・proxy_ex・saori_call_translator) | それぞれの DLL | ブラウザでは行えないので、元の SAORI が「できなかった」ときの答えを返す (ゴーストの台本は止まらない) |
+
+SSP が内蔵している SAORI (clipcopy・textcopy・saori_ip・saori_cpuid・mciaudio・cpuusage・httpc・houchi) は、SSP と同じく、ゴーストが DLL を同梱していなくても名前で使えます。
 
 SAORI について、できないこと・違うこと:
 
@@ -182,8 +189,31 @@ SAORI について、できないこと・違うこと:
 - saori-japanese-gengou の「今日」は、世界時 (UTC) の日付になります。
 - 灯 as SAORI (akari.dll) は、灯の本体のソースが公開されていないので使えません。
 - 蒼空を SAORI として使う saori_aosora (ninix-saori) は、上の理由で蒼空を組み込んでいないので使えません。
-- ネットワークを使う SAORI (chttpc・saori_curl・ip.dll) は、相手のサーバーが CORS を許していないと失敗します。
+- ネットワークを使う SAORI (chttpc・httpc・saori_curl・ip.dll) は、相手のサーバーが CORS を許していないと失敗します。
+- ソースが無く、画面に描く SAORI (easyballoon (bln.dll)・Weirds・scribble・effect・imgctl・hanayu) と string (りゅう) はまだ作り直していません。
+  『盤上の隅っこで』の五目並べ・バックギャモンなどの AI (sharo・kay・cocoa・charlotte) もソースが無いので使えません (六目並べの mio は使えます)。
+- 実行ファイルの SAORI (SAORI-basic。parallel.exe・mako.exe など) は、ブラウザではプログラムを起動できないので使えません。
 - WebAssembly の SHIORI・SAORI を組み込んだので、`index.html` と `engawa-embed.js` はそれぞれ約 14 MB です。
+
+### プラグインについて
+
+インストールしたプラグイン (PLUGIN/2.0) を読み込み、SSP と同じくイベントを送ります。
+プラグインの DLL は SHIORI と同じ形 (load / request / unload) なので、上の SHIORI の仕組みで動かします。
+いま使われているプラグインの多くは YAYA の辞書で書かれたもの (YAYA as PLUGIN。スタンプ帳・BalloonSelector など) で、そのまま動きます。
+kagari で書いたもの (kagari_as_plugin) も動きます。
+
+- 本体から送るもの: version・installedplugin・installedghostname・installedballoonname・ghostpathlist などの NOTIFY、OnSecondChange (`secondchangeinterval`)、
+  OnOtherGhostTalk (`otherghosttalk` の before・after)、OnGhostBoot・OnGhostExit・OnGhostInfoUpdate、メニューの「プラグイン」からの OnMenuExec、OnInstallComplete
+- ゴーストから: `\![raiseplugin]`・`\![notifyplugin]`・`\![timerraiseplugin]`・`\![timernotifyplugin]` (送れなければ OnRaisePluginFailure・OnNotifyPluginFailure)、
+  SHIORI の installedplugin・pluginpathlist、SSTP の `GetPluginNameList`
+- プラグインの応答: Event・EventOption (notify)・Reference・Target (`__SYSTEM_ALL_GHOST__` を含む)・Script・ScriptOption (nobreak・notranslate)・Marker。
+  プラグインが出したスクリプトの選択肢・アンカーと、`\![raise]`・`\![notify]`・`\![get,property]` のイベントは、そのプラグインに返します
+
+できないこと:
+
+- Windows の DLL のままのプラグイン (C++ や .NET で書いたもの、棒読みちゃん・Discord などのほかのアプリとつなぐもの) は動きません。メニューには「(動かせません)」と出ます。
+- PLUGIN/1.0 (何か・Materia のころの形。いま残っているのは FreeMem くらい) の DLL も動きません。
+- プラグインの拡張プロパティ (`pluginlist(…).ext.…` の property.get・property.set) は、プロパティを同期で読むので使えません。
 
 #### JavaScript で SHIORI を書く
 
@@ -234,7 +264,7 @@ engawaWindow.postMessage({ type: 'sstp', id: 1, request: 'NOTIFY SSTP/1.1\r\nSen
 
 ### ブラウザではできないこと
 
-DLL のプラグイン・ヘッドラインの実行、FMO、ポート 9801 の SSTP、時計合わせ (SNTP)、メールチェック (biff)、ping・nslookup・filewatch・ごみ箱、壁紙、ほかのアプリのウインドウ (OnOverlap などは起動中のゴーストのキャラクターだけ)、メディアプレーヤーの曲 (OnMusicPlay)、スリープ・ロック・スクリーンセーバー・仮想デスクトップ・CPU やメモリの負荷・デバイスの抜き差し、エディタ・エクスプローラなどほかのアプリを開くこと、CD の再生、`\m` (ウインドウメッセージ)。
+Windows の DLL のままのプラグイン (PLUGIN/1.0 のものを含む) とヘッドラインの実行、FMO、ポート 9801 の SSTP、時計合わせ (SNTP)、メールチェック (biff)、ping・nslookup・filewatch・ごみ箱、壁紙、ほかのアプリのウインドウ (OnOverlap などは起動中のゴーストのキャラクターだけ)、メディアプレーヤーの曲 (OnMusicPlay)、スリープ・ロック・スクリーンセーバー・仮想デスクトップ・CPU やメモリの負荷・デバイスの抜き差し、エディタ・エクスプローラなどほかのアプリを開くこと、CD の再生、`\m` (ウインドウメッセージ)。
 
 違うところ: `\![open,dialog,folder]` は取り消しとして扱い、`\![open,dialog,save]` はダウンロードになります。バッテリーは Chrome など Battery Status API のあるブラウザ、音声認識は Web Speech API のあるブラウザ (Chrome など) だけです。フォントの一覧 (OnNotifyFontInfo) は、よくあるフォントのうち入っているものだけを答えます。iCal・WebSocket も相手が CORS (WebSocket は接続) を許しているときだけです。ゴーストキャッシュにあるゴーストのセーブデータは、ページを閉じる・隠すときに書かれます。
 

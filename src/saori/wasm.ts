@@ -5,6 +5,7 @@ import createGengou from '../assets/saori/gengou.mjs';
 import createKisaragi from '../assets/saori/kisaragi.mjs';
 import createMahjongutil from '../assets/saori/mahjongutil.mjs';
 import createNodoka from '../assets/saori/nodoka.mjs';
+import createMio from '../assets/saori/mio.mjs';
 import createPiechart from '../assets/saori/piechart.mjs';
 import createQrcode from '../assets/saori/qrcode.mjs';
 import createResizedpng from '../assets/saori/resizedpng.mjs';
@@ -47,6 +48,7 @@ export const WASM_SAORI: Record<WasmSaoriKind, WasmSaori> = {
   mahjongutil: { create: createMahjongutil, pathCharset: 'shift_jis' },
   texasholdem: { create: createTexasholdem, pathCharset: 'utf-8' },
   nodoka: { create: createNodoka, pathCharset: 'utf-8' },
+  mio: { create: createMio, pathCharset: 'utf-8' },
   budoux: { create: createBudoux, pathCharset: 'utf-8' },
   calcs: { create: createCalcs, pathCharset: 'utf-8' },
   gengou: { create: createGengou, pathCharset: 'utf-8' },

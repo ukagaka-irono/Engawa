@@ -4,12 +4,12 @@ import { decodeText } from '../util/text';
 import { deletePackageFiles, getPackage, putPackage, readPackageFile, type PackageKind, type PackageMeta, type Refresh } from '../vfs/storage';
 
 /**
- * インストールの種類。plugin・headline・calendar skin・calendar plugin・language は、Engawa では動かせないが
- * SSP と同じく保存しておく (ゴーストからは一覧やプロパティで見える)。package は複数をまとめたもの
+ * インストールの種類。plugin は保存して src/plugin/ が動かす。headline・calendar skin・calendar plugin・language は、
+ * Engawa では動かせないが SSP と同じく保存しておく (ゴーストからは一覧やプロパティで見える)。package は複数をまとめたもの
  */
 export type InstallType = 'ghost' | 'balloon' | 'shell' | 'supplement' | 'plugin' | 'headline' | 'calendar skin' | 'calendar plugin' | 'language' | 'package';
 
-/** 保存するだけの種類 (パッケージのキーは `種類/ディレクトリ`) */
+/** ゴースト・バルーンと別に、そのまま保存する種類 (パッケージのキーは `種類/ディレクトリ`) */
 const STORED_TYPES: InstallType[] = ['plugin', 'headline', 'calendar skin', 'calendar plugin', 'language'];
 
 /** インストールしたもの1つ (OnInstallCompleteEx の識別子・名前・場所) */

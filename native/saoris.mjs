@@ -298,6 +298,18 @@ export const SAORIS = [
   },
   {
     ...TATAKINOV,
+    // 六目並べ (connect6) の AI (mio.dll。『盤上の隅っこで』が使う)。nodoka と同じ作り
+    name: 'mio',
+    label: 'connect6_mio',
+    repo: 'https://github.com/Tatakinov/connect6_mio.git',
+    commit: '5a67d02dddd8736e8d66b207ba2f0280964265ae',
+    licenses: [{ title: 'connect6_mio (MIT)', file: 'LICENSE' }],
+    headerDirs: ['.'],
+    edits: { 'util.h': [WINDOWS_ONLY] },
+    sources: ['connect6.cc', 'lib.cc', 'windows/util.cc', 'windows/dll.cc', 'base/header.cc'],
+  },
+  {
+    ...TATAKINOV,
     // BudouX で文を区切る。辞書 (model.json) はゴーストが DLL と一緒に置く。JSON は nlohmann/json で読む
     name: 'budoux',
     label: 'saori_budoux',

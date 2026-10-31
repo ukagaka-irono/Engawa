@@ -160,6 +160,69 @@ export function chttpc(ctx: SaoriContext): JsSaori {
 }
 
 /**
+ * httpc.dll (櫛ヶ浜やぎ。satoriya/httpc/httpc.cpp)。先頭に並べたオプション (euc・jis・sjis・utf8・erase_tag・translate_tag) の後に
+ *   (なし)            ネットにつながっていれば 1、でなければ 0
+ *   URL               取った中身
+ *   URL,ファイル      DLL のディレクトリのファイルに保存して 1 (できなければ 0)
+ *   URL,前,後         前と後に挟まれたところ (2つ目からは Value0…)
+ * 最初に bg,ID を付けると、結果を OnHttpcNotify (R0 = ID、R1 = -、R2 = 結果、R3… = 2つ目から) で知らせ、その場では空を返す。
+ * SSP も内蔵している (ukadoc の spec/saori-ex の互換モジュール)
+ */
+export function httpc(ctx: SaoriContext): JsSaori {
+  const OPTIONS = ['euc', 'jis', 'sjis', 'utf8', 'erase_tag', 'translate_tag'];
+  const CHARSETS: Record<string, string> = { euc: 'euc-jp', jis: 'iso-2022-jp', sjis: 'shift_jis', utf8: 'utf-8' };
+  const get = (url: string, opts: Set<string>): string | undefined => {
+    const res = fetchSync(url);
+    if (!res.ok || !res.data) return undefined;
+    const named = [...opts].find((o) => CHARSETS[o]);
+    let text = decodeText(res.data, named ? CHARSETS[named] : res.charset);
+    if (opts.has('translate_tag')) text = translateHtml(text, [], url);
+    else if (opts.has('erase_tag')) text = stripTags(text);
+    return text;
+  };
+  const run = (args: string[]): { result: string; values: string[] } => {
+    const opts = new Set<string>();
+    while (args.length && OPTIONS.includes(args[0])) opts.add(args.shift()!);
+    if (args.length === 0) return { result: online() ? '1' : '0', values: [] };
+    if (args.length === 1) return { result: get(args[0], opts) ?? '', values: [] };
+    if (args.length === 2) {
+      const res = fetchSync(args[0]);
+      if (!res.ok || !res.data) return { result: '0', values: [] };
+      const path = normalizePath(args[1], ctx.dir);
+      ctx.fs.writeFile(path, res.data);
+      ctx.post({ kind: 'write', path: path.slice(1), data: res.data.slice() });
+      return { result: '1', values: [] };
+    }
+    let data = get(args[0], opts);
+    if (data === undefined) return { result: '', values: [] };
+    const found: string[] = [];
+    for (;;) {
+      const s = data.indexOf(args[1]);
+      if (s < 0) break;
+      data = data.slice(s + args[1].length);
+      const e = data.indexOf(args[2]);
+      if (e < 0) break;
+      found.push(data.slice(0, e));
+      data = data.slice(e + args[2].length);
+    }
+    return { result: found[0] ?? '', values: found.slice(1) };
+  };
+  return {
+    execute({ args }) {
+      if (args[0] === 'bg') {
+        const id = args[1];
+        if (id === undefined) return { result: 'bgするならIDを指定していただけませんと。' };
+        const r = run(args.slice(2));
+        ctx.post({ kind: 'event', id: 'OnHttpcNotify', refs: [id, '-', r.result, ...r.values] });
+        return { result: '' };
+      }
+      const r = run([...args]);
+      return { result: r.result, values: r.values };
+    },
+  };
+}
+
+/**
  * saori_ip (ip.dll)。ブラウザからはこの機械の IP アドレスと名前は分からない。
  * GetInternetIP は元の SAORI と同じ所に聞く (CORS を許していなければ失敗)
  */

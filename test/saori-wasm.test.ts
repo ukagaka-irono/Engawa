@@ -6,6 +6,7 @@ import GENGOU_WASM from '../src/assets/saori/gengou.wasm.gz?inline';
 import KISARAGI_WASM from '../src/assets/saori/kisaragi.wasm.gz?inline';
 import MAHJONGUTIL_WASM from '../src/assets/saori/mahjongutil.wasm.gz?inline';
 import NODOKA_WASM from '../src/assets/saori/nodoka.wasm.gz?inline';
+import MIO_WASM from '../src/assets/saori/mio.wasm.gz?inline';
 import PIECHART_WASM from '../src/assets/saori/piechart.wasm.gz?inline';
 import QRCODE_WASM from '../src/assets/saori/qrcode.wasm.gz?inline';
 import RESIZEDPNG_WASM from '../src/assets/saori/resizedpng.wasm.gz?inline';
@@ -107,6 +108,16 @@ describe('麻雀・ポーカー (WebAssembly)', () => {
     expect(shanten).toBe('0');
     expect(tiles(effective)).toEqual(tiles('6m8m9m7m3m2m5m4m'));
     expect(tiles(unneeded)).toEqual(tiles('6m4m3m7m9m'));
+  });
+
+  it('connect6_mio: 六目並べの手番・着手・探索', async () => {
+    const s = await saori('mio', MIO_WASM, 'saori/mio/mio.dll');
+    s.execute('init');
+    expect(s.execute('teban').result).toBe('Black');
+    expect(s.execute('put', '7', '7').result).toBe('true');
+    expect(s.execute('isGameOver')).toMatchObject({ result: 'False', values: ['Continue'] });
+    const r = s.execute('search', '1');
+    expect(r.values[0]).toMatch(/^\d+,\d+$/);
   });
 
   it('TexasHoldemUtil: 役 (ロイヤルストレートフラッシュはストレートフラッシュの 9)', async () => {

@@ -9,7 +9,9 @@ import { advancedSysinfo, ccpuid } from './sysinfo';
 import { totpSaori } from './totp';
 import { getDesktopInfo, windowInfo } from './windows';
 import { aqTalk, callTranslator, fileVersion, makotoUtil, ninixExample, nullSaori, saoriTest, unavailable } from './misc';
-import { chttpc, ipTools, saoriCurl, saoriIp, uds } from './net';
+import { chttpc, httpc, ipTools, saoriCurl, saoriIp, uds } from './net';
+import { childProcess, choice, cpuusage, findwin, gomi, handUtil, houchi, osDetect, textcopy } from './classic';
+import { mciAudio } from './mciaudio';
 
 /** JavaScript で作り直した SAORI。DLL が開かれるたびに作る */
 export const JS_SAORI: Record<JsSaoriKind, (ctx: SaoriContext) => JsSaori> = {
@@ -46,4 +48,19 @@ export const JS_SAORI: Record<JsSaoriKind, (ctx: SaoriContext) => JsSaori> = {
   gainer: unavailable('gainer', { status: 500 }),
   effect_wrapper: unavailable('effect_wrapper', { status: 204 }),
   proxy_ex: unavailable('proxy_ex', { result: '' }),
+  mciaudio: (ctx) => mciAudio(ctx, false),
+  mciaudior: (ctx) => mciAudio(ctx, true),
+  httpc,
+  gomi,
+  findwin,
+  cpuusage,
+  choice,
+  os_detect: osDetect,
+  process: childProcess,
+  textcopy,
+  houchi,
+  // Ctrl+Shift+文字を、ほかのアプリを使っている間も受ける。ブラウザでは受けられない
+  hotkey: unavailable('hotkey', { status: 204 }),
+  screencatch: unavailable('screencatch', { status: 204 }),
+  handutil: handUtil,
 };

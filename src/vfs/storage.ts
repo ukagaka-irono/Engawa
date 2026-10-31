@@ -1,7 +1,7 @@
 import { clone } from '../util/clone';
 import { FileTree, basename, normalizePath } from './files';
 
-/** ゴースト・バルーンのほか、Engawa では動かせないが SSP と同じく保存しておくもの (プラグイン・ヘッドラインなど) */
+/** ゴースト・バルーン・プラグインのほか、Engawa では動かせないが SSP と同じく保存しておくもの (ヘッドラインなど) */
 export type PackageKind = 'ghost' | 'balloon' | 'plugin' | 'headline' | 'calendar skin' | 'calendar plugin' | 'language';
 
 export interface PackageMeta {

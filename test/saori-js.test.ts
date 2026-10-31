@@ -105,3 +105,68 @@ describe('計算', () => {
     expect(s.execute('GETKEYWORD', '今日はハレ').result).toBe('天気');
   });
 });
+
+describe('古くからの SAORI (使い方の説明から作り直したもの)', () => {
+  /** VS_FIXEDFILEINFO の頭だけを持つ DLL の代わり (4 バイト境界に置く) */
+  const versioned = (a: number, b: number, c: number, d: number) => {
+    const v = new DataView(new ArrayBuffer(24));
+    v.setUint32(8, 0xfeef04bd, true);
+    v.setUint32(12, 0x10000, true);
+    v.setUint32(16, (a << 16) | b, true);
+    v.setUint32(20, (c << 16) | d, true);
+    return new Uint8Array(v.buffer);
+  };
+  const ogg = Uint8Array.of(0x4f, 0x67, 0x67, 0x53);
+
+  it('mciaudior: load した曲をメインスレッドで鳴らす。construction 7 からは鳴り終わりを知らせる', async () => {
+    const s = await openSaori('mciaudior.dll', { 'mciaudior.dll': versioned(1, 0, 0, 24), 'sound/bgm.ogg': ogg });
+    expect(s.execute('play').result).toBe('0');
+    expect(s.execute('load', 'sound/BGM.ogg').result).toBe('1');
+    expect(s.execute('loop').result).toBe('1');
+    expect(s.execute('stop').result).toBe('1');
+    expect(s.y.effects).toEqual([
+      { kind: 'audio', channel: '/ghost/master/mciaudior.dll', op: 'load', path: 'ghost/master/sound/bgm.ogg', data: ogg, events: true },
+      { kind: 'audio', channel: '/ghost/master/mciaudior.dll', op: 'loop' },
+      { kind: 'audio', channel: '/ghost/master/mciaudior.dll', op: 'stop' },
+    ]);
+    expect(s.execute('load', 'nothing.wav').result).toBe('0');
+    const old = await openSaori('mciaudior.dll', { 'mciaudior.dll': versioned(1, 0, 0, 3), 'a.wav': ogg });
+    old.execute('load', 'a.wav');
+    expect(old.y.effects[0]).toMatchObject({ op: 'load', events: false });
+  });
+
+  it('SSP が内蔵しているもの (mciaudio・textcopy・houchi) は、DLL が無くても名前で開ける', async () => {
+    const s = await openSaori('saori/textcopy.dll');
+    expect(s.execute('こんにちは', '1').result).toBe('こんにちは');
+    expect(s.execute('x').status).toBe(204);
+    expect(s.y.effects).toEqual([
+      { kind: 'clipboard', text: 'こんにちは' },
+      { kind: 'clipboard', text: 'x' },
+    ]);
+    const h = await openSaori('houchi.dll');
+    expect(h.y.effects).toEqual([{ kind: 'houchi', on: true }]);
+    h.unload();
+    expect(h.y.effects).toEqual([
+      { kind: 'houchi', on: true },
+      { kind: 'houchi', on: false },
+    ]);
+  });
+
+  it('gomi・findwin・cpuusage・HandUtil: ブラウザに無いものは、無い・空・無効と答える', async () => {
+    const g = await openSaori('gomi.dll');
+    expect(g.execute('-n')).toMatchObject({ result: '0', values: ['0'] });
+    expect(g.execute('-ea').result).toBe('1');
+    expect(g.y.effects).toEqual([{ kind: 'event', id: 'OnRecycleBinEmptied', refs: [] }]);
+    const f = await openSaori('findwin.dll');
+    expect(f.execute('count', 'メモ帳', 'Notepad').result).toBe('0');
+    expect(f.execute('getcaption', 'x', 'Calc').result).toBe('');
+    expect((await openSaori('cpuusage.dll')).execute('get').result).toBe('0');
+    expect((await openSaori('HandUtil.dll')).execute('GetRect', '1', 'rect').result).toBe('-9999');
+  });
+
+  it('choice・os_detect・httpc (引数なしはつながっているか)', async () => {
+    expect(['a', 'b']).toContain((await openSaori('choice.dll')).execute('a', 'b').result);
+    expect((await openSaori('saori/os_detect/os_detect.dll')).execute('getOSName').result).toBe('Windows');
+    expect((await openSaori('httpc.dll')).execute().result).toBe('1');
+  });
+});

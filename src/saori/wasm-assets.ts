@@ -4,6 +4,7 @@ import GENGOU_WASM from '../assets/saori/gengou.wasm.gz?url';
 import KISARAGI_WASM from '../assets/saori/kisaragi.wasm.gz?url';
 import MAHJONGUTIL_WASM from '../assets/saori/mahjongutil.wasm.gz?url';
 import NODOKA_WASM from '../assets/saori/nodoka.wasm.gz?url';
+import MIO_WASM from '../assets/saori/mio.wasm.gz?url';
 import PIECHART_WASM from '../assets/saori/piechart.wasm.gz?url';
 import QRCODE_WASM from '../assets/saori/qrcode.wasm.gz?url';
 import RESIZEDPNG_WASM from '../assets/saori/resizedpng.wasm.gz?url';
@@ -29,6 +30,7 @@ const WASM_URLS: Record<WasmSaoriKind, string> = {
   mahjongutil: MAHJONGUTIL_WASM,
   texasholdem: TEXASHOLDEM_WASM,
   nodoka: NODOKA_WASM,
+  mio: MIO_WASM,
   budoux: BUDOUX_WASM,
   calcs: CALCS_WASM,
   gengou: GENGOU_WASM,

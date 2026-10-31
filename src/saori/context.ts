@@ -13,7 +13,15 @@ export type SaoriEffect =
   /** 音声合成で読む (AquesTalk の代わり)。stop なら止める。rate は速さの倍率 */
   | { kind: 'speak'; text: string; rate?: number; stop?: boolean }
   /** ゴーストにイベントを送る (SAORI over DirectSSTP の --async の結果) */
-  | { kind: 'event'; id: string; refs: string[] };
+  | { kind: 'event'; id: string; refs: string[] }
+  /**
+   * 1曲を読み込んで鳴らす SAORI (mciaudio・mciaudior)。channel ごとに1曲。play は一時停止と再開を兼ねる。
+   * events なら、鳴り終わり・繰り返しを OnMAAPlayFinish・OnMAAPlayLoop で知らせる
+   */
+  | { kind: 'audio'; channel: string; op: 'load'; path: string; data: Uint8Array; events: boolean }
+  | { kind: 'audio'; channel: string; op: 'play' | 'loop' | 'stop' | 'close' }
+  /** houchi (放置の知らせ) を始める・やめる */
+  | { kind: 'houchi'; on: boolean };
 
 /** SAORI が知りたい、ブラウザとページの様子。メインスレッドが読み込みのとき (と変わったとき) に送る */
 export interface SaoriEnv {

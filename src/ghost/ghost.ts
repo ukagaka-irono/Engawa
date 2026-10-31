@@ -2,6 +2,7 @@ import { zipSync } from 'fflate';
 import { BalloonView } from '../balloon/balloon-view';
 import type { BalloonSkin } from '../balloon/skin';
 import { Descript } from '../package/descript';
+import type { PluginBridge } from '../plugin/host';
 import type { SaoriEffect } from '../saori/context';
 import { ScriptPlayer, type InlineImage, type InlineImageOptions, type PlayerHost, type PlayResult } from '../sakura/player';
 import { buildRequest, parseResponse, type Reference, type ShioriMethod } from '../shiori/protocol';
@@ -167,6 +168,8 @@ export interface GhostEnv {
   toast(message: string): void;
   /** 起動時の、ブラウザとまわりの様子の NOTIFY (OnNetworkStatusChange・OnDarkTheme など) */
   environmentNotices(ghost: Ghost): Promise<void>;
+  /** プラグイン (PLUGIN/2.0) */
+  readonly plugins?: PluginBridge;
 }
 
 interface Scope {
@@ -200,6 +203,8 @@ interface ScriptContext {
   sstpSender?: string;
   /** トランスレートしない */
   noTranslate?: boolean;
+  /** このスクリプトを出したプラグインの ID (選択肢が選ばれたら、そのプラグインにも知らせる) */
+  plugin?: string;
 }
 
 /** 音1つ (\![sound,…]) */
@@ -250,7 +255,7 @@ function uniqueGroups(groups: string[][]): string[][] {
  * ほかのゴーストやイベントを動かすもの、開く・実行する・消す・更新する・設定を変えるものを止める
  */
 const REMOTE_BLOCKED =
-  /^(raise|notify|raiseother|notifyother|timerraise|timernotify|timerraiseother|timernotifyother|change|call|open|execute|vanishbymyself|updatebymyself|update|updateother|reload|unload|load|executesntp|biff|create),|^set,(property|wallpaper|tasktrayicon|trayballoon)$/;
+  /^(raise|notify|raiseother|notifyother|timerraise|timernotify|timerraiseother|timernotifyother|raiseplugin|notifyplugin|timerraiseplugin|timernotifyplugin|change|call|open|execute|vanishbymyself|updatebymyself|update|updateother|reload|unload|load|executesntp|biff|create),|^set,(property|wallpaper|tasktrayicon|trayballoon)$/;
 
 /** ファイル名から MIME タイプ (blob URL で開くときに要る) */
 function mimeOf(path: string): string {
@@ -372,6 +377,11 @@ export class Ghost implements PlayerHost {
   /** \![open,dialog,save] で返した download/ のパス (そこへ書かれたらダウンロードにする) */
   private readonly saveTargets = new Set<string>();
   private readonly sounds = new Map<string, Sound>();
+  /** mciaudio・mciaudior の SAORI が鳴らす曲 (SAORI ごとに1曲) */
+  /** houchi (SAORI) が読み込まれている。houchiMinutes は最後に知らせた分数 */
+  private houchi = false;
+  private houchiMinutes = 0;
+  private readonly saoriAudio = new Map<string, { audio: HTMLAudioElement; url: string; events: boolean; looping: boolean }>();
   private userName?: string;
   private previous?: GhostIdentity;
   /**
@@ -586,6 +596,8 @@ export class Ghost implements PlayerHost {
     await this.notify('installedshellname', this.shellDirs.map((d) => Shell.fromGhost(this.files, d).name));
     await this.notify('ghostpathlist', ['/ghost/']);
     await this.notify('balloonpathlist', ['/balloon/']);
+    await this.notify('installedplugin', (this.env.plugins?.names() ?? []).map((p) => `${p.name}\x01${p.id}`));
+    await this.notify('pluginpathlist', ['/plugin/']);
     await this.notify('rateofusegraph', rateOfUse(all).map((r) => [r.meta.name, r.meta.sakuraName ?? '', '', r.boots, r.minutes, r.percent.toFixed(2), this.env.others(this).some((g) => g.key === r.meta.key) || r.meta.key === this.key ? 'boot' : 'install'].join('\x01')));
     await this.notify('OnNotifySelfInfo', [this.name, this.sakuraName, this.keroName, this.shell.name, `/ghost/${this.key}/shell/${this.shell.dir}/`, this.skin.name, this.skin.key ?? '']);
     await this.notify('OnNotifyBalloonInfo', [this.skin.name, this.skin.key ?? '', `0:${[...Array(this.skin.count('s')).keys()].map((i) => i * 2).join(',')} 1:${[...Array(this.skin.count('k')).keys()].map((i) => i * 2).join(',')}`]);
@@ -739,6 +751,7 @@ export class Ghost implements PlayerHost {
     for (const t of this.namedTimers.values()) clearTimeout(t);
     this.namedTimers.clear();
     for (const s of this.sounds.values()) this.stopSound(s, undefined);
+    this.closeSaoriAudio();
     this.env.closeInput(this);
     this.endSelect(true);
     hideTooltip();
@@ -837,6 +850,7 @@ export class Ghost implements PlayerHost {
       if (s.revoke) URL.revokeObjectURL(s.url);
     }
     this.sounds.clear();
+    this.closeSaoriAudio();
     for (const url of [...this.sockets.keys()]) this.closeWebSocket(url, 1000, true);
     this.endSelect(true);
     for (const a of this.httpAborts.values()) a.abort();
@@ -957,6 +971,8 @@ export class Ghost implements PlayerHost {
     if (ctx.event === 'OnOtherGhostTalk') return;
     const refs = [this.name, this.sakuraName, kinds.join(','), ctx.event ?? '', script, (ctx.refs ?? []).join('\x01')];
     for (const g of this.env.others(this)) if (g.otherGhostTalk === when) void g.raise('OnOtherGhostTalk', refs);
+    // プラグインには、descript.txt の otherghosttalk で頼んだものに (自分のゴーストの話も含めて) 知らせる
+    this.env.plugins?.talked(this, when, refs, ctx.plugin);
   }
 
   async playScript(script: string, ctx: ScriptContext = {}): Promise<void> {
@@ -1519,6 +1535,8 @@ export class Ghost implements PlayerHost {
     if (this.shell !== next) return;
     this.applyZorder();
     saveSettings();
+    // プラグインには、ゴーストの様子 (シェル名) が変わったことを知らせる
+    this.env.plugins?.infoUpdated(this);
     if (opts.force) return;
     const changed = () => void this.raise('OnShellChanged', [next.name, this.name, path]);
     if (opts.fromScript) this.defer(changed);
@@ -1771,6 +1789,12 @@ export class Ghost implements PlayerHost {
         await this.raise(id, refs, { ifIdle: true, method: canTalk ? 'GET' : 'NOTIFY' });
       };
       await timeEvent('OnSecondChange');
+      // houchi (SAORI): 操作していない間、1分ごとに OnHouchi (R0 = 操作していない分数)
+      const idleMinutes = Math.floor(idle / 60);
+      if (this.houchi && idleMinutes >= 1 && idleMinutes !== this.houchiMinutes && !quiet) {
+        this.houchiMinutes = idleMinutes;
+        await this.raise('OnHouchi', [idleMinutes], { ifIdle: true });
+      } else if (idleMinutes === 0) this.houchiMinutes = 0;
       // タイマーのずれで :00 を飛ばしても取りこぼさないよう、分が変わったかで判定する
       const now = new Date();
       if (now.getMinutes() !== this.lastMinute) {
@@ -2142,12 +2166,17 @@ export class Ghost implements PlayerHost {
   selectChoice(title: string, id: string, refs: string[]): void {
     clearTimeout(this.linkHoverTimer);
     hideTooltip();
+    const plugin = this.takePluginOfScript();
     this.player.abort();
     this.endScript();
     this.closeBalloons();
     if (id.startsWith('script:')) {
       void this.playScript(id.slice(7));
       return;
+    }
+    if (plugin) {
+      const events: [string, Reference[]][] = /^On/.test(id) ? [[id, refs]] : [['OnChoiceSelectEx', [title, id, ...refs]], ['OnChoiceSelect', [id, ...refs]]];
+      void this.env.plugins?.forward(this, plugin, 'GET', events);
     }
     void (async () => {
       const played = /^On/.test(id)
@@ -2160,6 +2189,11 @@ export class Ghost implements PlayerHost {
   /** アンカー。On で始まる ID はそのイベント、それ以外は OnAnchorSelectEx → OnAnchorSelect。URL は最後に開く */
   selectAnchor(title: string, id: string, refs: string[]): void {
     clearTimeout(this.linkHoverTimer);
+    const plugin = this.takePluginOfScript();
+    if (plugin) {
+      const events: [string, Reference[]][] = /^On/.test(id) ? [[id, refs]] : [['OnAnchorSelectEx', [title, id, ...refs]], ['OnAnchorSelect', [id, ...refs]]];
+      void this.env.plugins?.forward(this, plugin, 'GET', events);
+    }
     if (/^On/.test(id)) {
       void this.raise(id, refs);
       return;
@@ -2168,6 +2202,19 @@ export class Ghost implements PlayerHost {
       const played = (await this.raise('OnAnchorSelectEx', [title, id, ...refs])) ?? (await this.raise('OnAnchorSelect', [id, ...refs]));
       if (!played && /^(https?|mailto):/i.test(id)) this.openUrl(id);
     })();
+  }
+
+  /** プラグインにイベントを送る。送れなかったら OnRaisePluginFailure / OnNotifyPluginFailure (R0 = 理由) */
+  private async callPlugin(method: 'GET' | 'NOTIFY', target: string, event: string, refs: string[]): Promise<void> {
+    const why = this.env.plugins ? await this.env.plugins.call(this, target, method, event, refs) : 'notfound';
+    if (why) void this.raise(method === 'GET' ? 'OnRaisePluginFailure' : 'OnNotifyPluginFailure', [why, target, event, ...refs]);
+  }
+
+  /** 今のスクリプトを出したプラグイン。選択肢・アンカーを知らせるのは1回だけ (ukadoc の PLUGIN Event) */
+  private takePluginOfScript(): string | undefined {
+    const plugin = this.context.plugin;
+    this.context = { ...this.context, plugin: undefined };
+    return plugin;
   }
 
   /** \4 (離れる) / \5 (寄る)。相手は sakura なら kero、それ以外は sakura */
@@ -2212,6 +2259,13 @@ export class Ghost implements PlayerHost {
       return;
     }
     const raiseEvent = hasOption(arg, 'raise-event');
+    // プラグインが出したスクリプトの \![raise]・\![notify]・\![get,property] のイベントは、そのプラグインに返す
+    const plugin = this.context.plugin;
+    if (plugin && arg[1] && (cmd === 'raise' || cmd === 'notify' || (cmd === 'get' && sub === 'property' && arg[2]))) {
+      const [id, refs] = cmd === 'get' ? [arg[2], arg.slice(3).map((p) => this.property(p))] : [arg[1], arg.slice(2)];
+      void this.env.plugins?.forward(this, plugin, cmd === 'notify' ? 'NOTIFY' : 'GET', [[id, refs]]);
+      return;
+    }
     switch (cmd) {
       case 'raise':
         if (arg[1]) void this.raise(arg[1], arg.slice(2));
@@ -2238,17 +2292,25 @@ export class Ghost implements PlayerHost {
           if (failed.length) void this.raise(failure, [failed.map((f) => f[0]).join('\x01'), failed.map((f) => f[1]).join('\x01'), arg[2]]);
         }
         return;
+      case 'raiseplugin':
+      case 'notifyplugin':
+        // \![raiseplugin,プラグインの名前か ID,イベント名,r0…]。送れなかったら OnRaisePluginFailure / OnNotifyPluginFailure
+        if (arg[1] && arg[2]) void this.callPlugin(cmd === 'raiseplugin' ? 'GET' : 'NOTIFY', arg[1], arg[2], arg.slice(3));
+        return;
       case 'timerraise':
       case 'timernotify':
       case 'timerraiseother':
-      case 'timernotifyother': {
+      case 'timernotifyother':
+      case 'timerraiseplugin':
+      case 'timernotifyplugin': {
         // \![timerraise,ms,繰り返し,イベント,r0…]。同じイベント名は上書きし、ms が 0 なら取り消す。
-        // 繰り返しは 0 で毎回、1 以上で1回だけ。…other は3つ目がゴースト名
-        const other = cmd.endsWith('other');
+        // 繰り返しは 0 で毎回、1 以上で1回だけ。…other は3つ目がゴースト名、…plugin はプラグインの名前か ID
+        const plugin = cmd.endsWith('plugin');
+        const other = cmd.endsWith('other') || plugin;
         const target = other ? arg[3] : undefined;
         const event = other ? arg[4] : arg[3];
         if (!event) return;
-        const key = `${target ?? ''}\x01${event}`;
+        const key = `${plugin ? 'plugin:' : ''}${target ?? ''}\x01${event}`;
         const ms = Number(arg[1]) || 0;
         const repeat = Number(arg[2]) || 0;
         const refs = arg.slice(other ? 5 : 4);
@@ -2260,6 +2322,10 @@ export class Ghost implements PlayerHost {
           if (this.destroyed) return;
           if (repeat === 0) this.namedTimers.set(key, window.setTimeout(fire, ms));
           else this.namedTimers.delete(key);
+          if (plugin) {
+            void this.callPlugin(notify ? 'NOTIFY' : 'GET', target ?? '', event, refs);
+            return;
+          }
           const targets: Ghost[] = target ? this.otherTargets(target) : [this];
           for (const g of targets) void (notify ? g.notify(event, refs) : g.raise(event, refs));
         };
@@ -3479,6 +3545,11 @@ export class Ghost implements PlayerHost {
     } else if (effect.kind === 'event') {
       // SAORI over DirectSSTP の --async の結果
       void this.raise(effect.id, effect.refs);
+    } else if (effect.kind === 'audio') {
+      this.saoriAudioOp(effect);
+    } else if (effect.kind === 'houchi') {
+      this.houchi = effect.on;
+      this.houchiMinutes = 0;
     } else if (effect.kind === 'speak' && typeof speechSynthesis !== 'undefined') {
       if (effect.stop) speechSynthesis.cancel();
       else if (effect.text) {
@@ -3487,6 +3558,59 @@ export class Ghost implements PlayerHost {
         if (effect.rate) u.rate = Math.min(10, Math.max(0.1, effect.rate));
         speechSynthesis.speak(u);
       }
+    }
+  }
+
+  /** mciaudio・mciaudior。play は鳴っていれば一時停止、止まっていれば続きから (鳴り終わっていれば始めから) */
+  private saoriAudioOp(effect: Extract<SaoriEffect, { kind: 'audio' }>): void {
+    const cur = this.saoriAudio.get(effect.channel);
+    if (effect.op === 'load') {
+      if (cur) this.closeSaoriAudio(effect.channel);
+      const url = URL.createObjectURL(new Blob([effect.data as BlobPart], { type: mimeOf(effect.path) }));
+      const entry = { audio: new Audio(url), url, events: effect.events, looping: false };
+      entry.audio.addEventListener('ended', () => {
+        if (this.saoriAudio.get(effect.channel) !== entry) return;
+        if (entry.looping) {
+          entry.audio.currentTime = 0;
+          void entry.audio.play().catch(() => undefined);
+          if (entry.events) void this.raise('OnMAAPlayLoop');
+        } else if (entry.events) void this.raise('OnMAAPlayFinish');
+      });
+      this.saoriAudio.set(effect.channel, entry);
+      return;
+    }
+    if (!cur) return;
+    const { audio } = cur;
+    switch (effect.op) {
+      case 'play':
+        if (!audio.paused) audio.pause();
+        else {
+          cur.looping = false;
+          void audio.play().catch(() => undefined);
+        }
+        return;
+      case 'loop':
+        cur.looping = true;
+        audio.currentTime = 0;
+        void audio.play().catch(() => undefined);
+        return;
+      case 'stop':
+        cur.looping = false;
+        audio.pause();
+        audio.currentTime = 0;
+        return;
+      case 'close':
+        this.closeSaoriAudio(effect.channel);
+    }
+  }
+
+  /** SAORI の曲を止めて捨てる (channel が無ければすべて) */
+  private closeSaoriAudio(channel?: string): void {
+    for (const [key, a] of this.saoriAudio) {
+      if (channel !== undefined && key !== channel) continue;
+      a.audio.pause();
+      URL.revokeObjectURL(a.url);
+      this.saoriAudio.delete(key);
     }
   }
 

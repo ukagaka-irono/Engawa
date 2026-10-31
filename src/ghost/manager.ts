@@ -42,6 +42,7 @@ import type { LogEntry } from './properties';
 import { addHistory, saveSettings, saveSettingsNow, settings } from './settings';
 import { EnvironmentEvents } from './environment';
 import { handleSstp, type SstpHost } from './sstp';
+import { PluginHost } from '../plugin/host';
 
 // ビルドでは data: URL として index.html に埋め込まれる (file:// で開いても読めるように)
 import SAMPLE_URL from '../assets/engawa.nar?url';
@@ -108,6 +109,8 @@ export class GhostManager implements GhostEnv {
   private readonly sstpCookies = loadCookies();
   /** ネットワーク・バッテリー・ゲームパッドなど、まわりの変化 */
   private readonly environment: EnvironmentEvents;
+  /** プラグイン (PLUGIN/2.0) */
+  readonly plugins: PluginHost;
 
   /**
    * embedded: よそのページに埋め込んで使う (ななろだのおためし起動など。src/embed.ts)。
@@ -134,6 +137,12 @@ export class GhostManager implements GhostEnv {
       () => this.current,
       desktop,
     );
+    this.plugins = new PluginHost({
+      ghosts: () => this.ghosts,
+      current: () => this.current,
+      installed: () => this.packages,
+      log: (name, text) => this.logPlugin(name, text),
+    });
   }
 
   environmentNotices(ghost: Ghost): Promise<void> {
@@ -150,7 +159,10 @@ export class GhostManager implements GhostEnv {
     };
     requestAnimationFrame(loop);
     this.environment.start();
-    window.setInterval(() => this.environment.second(), 1000);
+    window.setInterval(() => {
+      this.environment.second();
+      this.plugins.second();
+    }, 1000);
 
     await this.refreshPackages();
     if (this.options.embedded) return;
@@ -248,6 +260,7 @@ export class GhostManager implements GhostEnv {
 
   closed(ghost: Ghost): void {
     this.trayIcons.delete(ghost);
+    if (this.ghosts.includes(ghost)) this.plugins.ghostExited(ghost);
     for (const [name, obj] of this.syncObjects) if (!obj.waiters.size && !obj.signaled) this.syncObjects.delete(name);
     const i = this.ghosts.indexOf(ghost);
     if (i >= 0) this.ghosts.splice(i, 1);
@@ -530,8 +543,18 @@ export class GhostManager implements GhostEnv {
   }
 
   log(ghost: Ghost, kind: 'request' | 'error' | 'script', text: string): void {
+    this.addLog(kind, ghost.name, text);
+  }
+
+  /** プラグインのエラー (プラグインの名前でエラーログに) */
+  private logPlugin(name: string, text: string): void {
+    console.info(`[plugin ${name}]`, text);
+    this.addLog('error', name, text);
+  }
+
+  private addLog(kind: 'request' | 'error' | 'script', name: string, text: string): void {
     const list = this.logStore.get(kind) ?? [];
-    list.push({ type: kind === 'script' ? 'Ghost' : kind === 'error' ? 'Error' : 'Info', name: ghost.name, value: text, time: new Date() });
+    list.push({ type: kind === 'script' ? 'Ghost' : kind === 'error' ? 'Error' : 'Info', name, value: text, time: new Date() });
     if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
     this.logStore.set(kind, list);
   }
@@ -579,6 +602,7 @@ export class GhostManager implements GhostEnv {
         }
       },
       version: BASEWARE_VERSION,
+      pluginNames: () => this.plugins.list().map((p) => p.name),
     };
   }
 
@@ -593,6 +617,8 @@ export class GhostManager implements GhostEnv {
   private async refreshPackages(quiet = false): Promise<string | undefined> {
     try {
       this.packages = (await listPackages()).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      // 増えた・消えたプラグインを読み込み直す (待たない。読み込めたら起動中のゴーストの OnGhostBoot を送る)
+      void this.plugins.sync(this.packages);
       return undefined;
     } catch (e) {
       const reason = (e as Error).message;
@@ -646,6 +672,8 @@ export class GhostManager implements GhostEnv {
     if (i >= 0) this.ghosts.splice(i, 1);
     if (this.current === ghost) this.current = this.ghosts[0];
     this.cached.unshift(ghost);
+    // キャッシュに入れたゴーストは、プラグインから見れば終わったもの
+    this.plugins.ghostExited(ghost);
     // 多すぎる分は本当に終わらせる
     for (const old of this.cached.splice(GhostManager.CACHE_SIZE)) void old.destroy({ silent: true }).catch(() => undefined);
     settings.running = this.ghosts.map((g) => g.key);
@@ -676,6 +704,7 @@ export class GhostManager implements GhostEnv {
       settings.running = this.ghosts.map((g) => g.key);
       saveSettings();
       await cached.resume(mode);
+      this.plugins.ghostBooted(cached);
       this.updateEmptyState();
       return cached;
     }
@@ -692,6 +721,7 @@ export class GhostManager implements GhostEnv {
       settings.running = this.ghosts.map((g) => g.key);
       saveSettings();
       await ghost.start(mode);
+      if (ghost.alive) this.plugins.ghostBooted(ghost);
       return ghost;
     } catch (e) {
       console.error(e);
@@ -843,6 +873,7 @@ export class GhostManager implements GhostEnv {
       return (await g.raise('OnInstallCompleteEx', ex)) ?? (await g.raise('OnInstallComplete', completeRefs));
     };
     this.installedBatch.push(...result.installed);
+    this.plugins.installComplete(result.installed);
     // 終わりかけのゴーストには知らせない (再起動も勧めない)
     const target = this.ghosts.find((g) => g.key === result.key && g.alive && !g.leaving);
     let played: string | undefined;
@@ -1166,6 +1197,16 @@ export class GhostManager implements GhostEnv {
       items.push({ separator: true });
     }
 
+    // プラグイン (選ぶと OnMenuExec)。読み込めなかったものは選べない
+    const plugins = this.plugins.list();
+    if (plugins.length) {
+      items.push({
+        label: 'プラグイン',
+        key: 'J',
+        submenu: plugins.map((p): MenuItem => ({ label: p.failed ? `${p.name} (動かせません)` : p.name, disabled: !p.runnable, action: () => this.plugins.menuExec(p, g) })),
+      });
+      items.push({ separator: true });
+    }
     items.push({
       label: 'インストール',
       key: 'I',
@@ -1358,6 +1399,7 @@ export class GhostManager implements GhostEnv {
       // 互換性の試験 (tools/compat-check.mjs) が使う: 起動中のゴーストの様子と、ログ
       status: () => this.ghosts.map((g) => ({ name: g.name, key: g.key, shiori: g.shioriName, shell: g.shell?.name, status: g.status(), surfaces: [g.surfaceOf(0), g.surfaceOf(1)] })),
       logs: (kind: string) => this.logs(kind).map((l) => `${l.name}: ${l.value}`),
+      plugins: () => this.plugins.list().map((p) => ({ name: p.name, id: p.id, version: p.version, runnable: p.runnable, failed: p.failed })),
       close: () => this.current?.close(),
     };
     // x-ukagaka-link: のリンク (ページのリンクを押したとき・アドレスの ?x-ukagaka-link=… / #x-ukagaka-link:…)

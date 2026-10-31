@@ -6,7 +6,7 @@
 // を行って、バルーンの文字・通知・エラーを tools/.compat/report.json と report.md に書く。
 // ゴーストのファイルは取ってくるだけで、リポジトリには入れない (それぞれのライセンスがあるため)。
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -25,6 +25,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 if (!chrome) throw new Error('Chrome が見つかりません (環境変数 CHROME で指定できます)');
 if (!existsSync(join(root, 'dist', 'index.html'))) throw new Error('dist/index.html がありません。先に npm run build');
 mkdirSync(join(cache, 'nar'), { recursive: true });
+// 前の実行で消せなかった Chrome のプロファイル (Chrome がファイルをつかんだまま終わると残る。1つ数百 MB になる) を消す
+for (const d of readdirSync(cache)) if (d.startsWith('profile-')) rmSync(join(cache, d), { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
 
 // 引数はリポジトリの名前の一部か、手元の .nar / .zip のパス
 const wanted = process.argv.slice(2);

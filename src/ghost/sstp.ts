@@ -23,6 +23,8 @@ export interface SstpHost {
   cookies: Record<string, Record<string, string>>;
   saveCookies(): void;
   version: string;
+  /** 読み込んだプラグインの名前 */
+  pluginNames?(): string[];
 }
 
 const STATUS: Record<number, string> = {
@@ -218,8 +220,9 @@ async function execute(req: SstpRequest, host: SstpHost, local: boolean, sender:
     case 'getshellnamelist':
       return g ? response(200, [], lines(g.shellDirs)) : response(404);
     case 'getheadlinenamelist':
-    case 'getpluginnamelist':
       return response(200, [], '\r\n');
+    case 'getpluginnamelist':
+      return response(200, [], lines(host.pluginNames?.() ?? []));
     case 'getversion':
       return response(200, [], `Engawa ${host.version}`);
     case 'getshortversion':
