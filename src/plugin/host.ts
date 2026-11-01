@@ -1,4 +1,5 @@
 import type { Ghost } from '../ghost/ghost';
+import { t } from '../i18n';
 import type { SaoriEffect } from '../saori/context';
 import type { Reference } from '../shiori/protocol';
 import { copyText } from '../util/clipboard';
@@ -101,7 +102,7 @@ export class PluginHost implements PluginBridge {
       try {
         files = await readPackageFiles(m.key);
       } catch (e) {
-        this.env.log(m.name, `プラグインを読めませんでした: ${(e as Error).message}`);
+        this.env.log(m.name, t('plugin.readFailed', { error: (e as Error).message }));
         continue;
       }
       // 読んでいる間に消された・入れ直されたなら読み込まない
@@ -289,6 +290,6 @@ export class PluginHost implements PluginBridge {
     else if (effect.kind === 'speak' && typeof speechSynthesis !== 'undefined') {
       if (effect.stop) speechSynthesis.cancel();
       else if (effect.text) speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(effect.text), { lang: 'ja-JP' }));
-    } else this.env.log(plugin.name, `プラグインの SAORI の ${effect.kind} は使えません`);
+    } else this.env.log(plugin.name, t('plugin.saoriUnsupported', { kind: effect.kind }));
   }
 }

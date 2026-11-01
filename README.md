@@ -26,6 +26,7 @@ npm run dev
 - **インストール**: `.nar` / `.zip` ファイルやゴーストのフォルダを画面にドロップします。メニューの「インストール」からも選べます。
 - **メニュー**: キャラクターかバルーンを右クリックするか、画面下のタスクバーの右端にある「縁」アイコンを押します。メニューを開いているときは、項目の後ろの文字 (「ゴースト切り替え(G)」の G など) を押しても選べます。
 - **ヘルプ**: メニューの「ヘルプ」で、この説明を開けます。
+- **言語**: メニュー・ダイアログ・通知は、日本語・English・简体中文・繁體中文・한국어 で出せます。最初はブラウザの言語 (`navigator.languages`) から選び (どれにも当たらなければ英語)、メニューの「言語 (Language)」かオプションの「言語」で変えられます。ヘルプ (この説明) は日本語だけです。
 - **スマートフォン・タブレット**: キャラクターを長押しするとメニュー、2回続けてタップするとダブルクリックになります。
 - **キャラクターの移動**: ドラッグします (`seriko.alignmenttodesktop,free` のシェルは上下にも動かせます)。
 
@@ -277,6 +278,10 @@ engawaWindow.postMessage({ type: 'sstp', id: 1, request: 'NOTIFY SSTP/1.1\r\nSen
 // 応答は { type: 'sstp-response', id: 1, response: 'SSTP/1.4 200 OK…' } で返ってくる
 ```
 
+### 言語について
+
+ゴーストには、選んだ言語を SSP の言語パック ([ukatech/ssp-i18n](https://github.com/ukatech/ssp-i18n)) と同じ言語名・言語 ID で OnLanguageChange (起動時は NOTIFY、変えたときは GET) で知らせます (日本語は SSP に組み込みの日本語と同じく `Japanese`・`0`、English は `1033`、Chinese-Simplified は `2052`、Chinese-Traditional は `1028`、Korean は `1042`。Reference2 の言語のフォルダは `/language/english/` のような仮のパス)。OnNotifyInternationalInfo と `system.os.locale` は、SSP の OS のロケールにあたるブラウザの言語のままです。祝日表は日本のものしか無いので、OnNotifyHolidayInfo は日本語のときだけ送ります。言語の表は `src/i18n/` にあり、日本語の表 (`ja.ts`) を元に訳しています。ssp-i18n にはライセンスの記載が無いので訳文は取り込まず、ゴースト・シェル・バルーンなどの用語の対応だけを合わせています。
+
 ### ブラウザではできないこと
 
 Windows の DLL のままのプラグイン (PLUGIN/1.0 のものを含む) とヘッドラインの実行、FMO、ポート 9801 の SSTP、時計合わせ (SNTP)、メールチェック (biff)、ping・nslookup・filewatch・ごみ箱、壁紙、ほかのアプリのウインドウ (OnOverlap などは起動中のゴーストのキャラクターだけ)、メディアプレーヤーの曲 (OnMusicPlay)、スリープ・ロック・スクリーンセーバー・仮想デスクトップ・CPU やメモリの負荷・デバイスの抜き差し、エディタ・エクスプローラなどほかのアプリを開くこと、CD の再生、`\m` (ウインドウメッセージ)。
@@ -298,6 +303,7 @@ src/
   sakura/    さくらスクリプトの字句解析と再生
   ghost/     ゴースト本体 (イベント処理)、ベースウェア全体の管理、設定
   ui/        メニュー (シェルの menu.* に対応)、ダイアログ、ヘルプ、画面の骨組み
+  i18n/      画面の文字の言語ごとの表 (ja.ts が元。en・zh-hans・zh-hant・ko) と言語の選び方
   embed.ts   よそのページに埋め込む版の入口 (Ikagaka.demo と同じ関数を出す。ビルドは vite.embed.config.ts)
 sample/      サンプルゴーストのテキスト (画像は tools/ で生成)
 tools/       サンプルゴーストの .nar を作るスクリプト

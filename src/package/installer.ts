@@ -1,3 +1,4 @@
+import { t as tr } from '../i18n';
 import { Descript } from './descript';
 import { FileTree, normalizePath } from '../vfs/files';
 import { decodeText } from '../util/text';
@@ -78,7 +79,7 @@ function detectType(files: FileTree, install: Descript): InstallType | undefined
   if (t) {
     if (t.startsWith('ghost')) return 'ghost';
     if (t === 'balloon' || t === 'shell' || t === 'supplement' || t === 'package' || (STORED_TYPES as string[]).includes(t)) return t as InstallType;
-    throw new InstallError(`install.txt の type「${t}」が分かりません`, 'invalid type');
+    throw new InstallError(tr('install.unknownType', { type: t }), 'invalid type');
   }
   if (files.has('ghost/master/descript.txt')) return 'ghost';
   if (Descript.read(files, 'descript.txt').str('type').toLowerCase() === 'balloon' || files.has('balloons0.png')) {
@@ -190,20 +191,17 @@ function pickTarget(targets: InstallTarget[], accept: string, preferred: string 
     const hits = targets.filter((t) => t.sakuraName === accept || t.acceptNames?.includes(accept));
     const target = hits.find((t) => t.key === preferred) ?? hits[0];
     if (!target) {
-      throw new InstallError(`「${accept}」宛てですが、そのゴーストがインストールされていません`, 'unsupported', { accept, ...item });
+      throw new InstallError(tr('install.acceptMissing', { accept }), 'unsupported', { accept, ...item });
     }
     return target;
   }
   // accept が無ければ選択中のゴーストへ。選択中のゴーストがあるのに宛先に無いときは、別のゴーストに入れない
   const target = preferred !== undefined ? targets.find((t) => t.key === preferred) : targets[0];
   if (!target) {
-    throw new InstallError(preferred !== undefined ? MISSING_TARGET : 'インストール先になるゴーストがありません', 'unsupported');
+    throw new InstallError(tr(preferred !== undefined ? 'install.targetMissing' : 'install.noTarget'), 'unsupported');
   }
   return target;
 }
-
-/** 選んだインストール先のゴーストが (別のタブで削除されたなどで) 見つからない */
-const MISSING_TARGET = 'インストール先のゴーストが見つかりません';
 
 /**
  * 展開済みのアーカイブをインストールする。
@@ -220,7 +218,7 @@ export async function installFiles(
   const files = findRoot(input);
   const install = Descript.read(files, 'install.txt');
   const type = detectType(files, install);
-  if (!type) throw new InstallError('ゴースト・シェル・バルーンのいずれとしても認識できませんでした', 'invalid type');
+  if (!type) throw new InstallError(tr('install.unrecognized'), 'invalid type');
   const dir = safeDir(install.str('directory') || fallbackName.replace(/\.(nar|zip)$/i, ''));
   const now = Date.now();
   const rest = withoutInstallTxt(files);
@@ -234,7 +232,7 @@ export async function installFiles(
       if (!part.has('install.txt') && !detectType(part, new Descript())) continue;
       results.push(await installFiles(part, sub, targets, preferred));
     }
-    if (!results.length) throw new InstallError('パッケージの中にインストールできるものがありません', 'invalid type');
+    if (!results.length) throw new InstallError(tr('install.emptyPackage'), 'invalid type');
     const main = results.find((r) => r.type === 'ghost') ?? results[0];
     const name = install.str('name', main.name);
     return { ...main, type: 'package', name, installName: name, installed: results.flatMap((r) => r.installed) };
@@ -254,7 +252,8 @@ export async function installFiles(
     const name = type === 'shell' ? Descript.read(files, 'descript.txt').str('name', dir) : install.str('name', dir);
     const target = pickTarget(await targets(), accept, preferred, { type, name: install.str('name', name) });
     const existing = await getPackage(target.key);
-    if (!existing) throw new InstallError(MISSING_TARGET, 'unsupported');
+    // 選んだインストール先のゴーストが (別のタブで削除されたなどで) 見つからない
+    if (!existing) throw new InstallError(tr('install.targetMissing'), 'unsupported');
     const bundled = await installBundled(files, install, rest, now);
     const prefix = type === 'shell' ? `shell/${dir}/` : '';
     await putPackage(existing, rest, prefix, refreshOf(install, type === 'shell' ? `shell/${dir}` : ''));

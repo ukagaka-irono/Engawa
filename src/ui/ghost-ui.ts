@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { el } from './dom';
 
 /**
@@ -95,7 +96,7 @@ export function openSystemDialog(kind: string, args: string[], id: string): Prom
     if (kind === 'save') {
       const ext = option(args, 'ext');
       const fallback = `${option(args, 'name') ?? 'untitled'}${ext ? `.${ext}` : ''}`;
-      const name = window.prompt(option(args, 'title') ?? '保存するファイルの名前', fallback);
+      const name = window.prompt(option(args, 'title') ?? t('input.saveFileName'), fallback);
       finish(name ? { value: `download/${name.replace(/[\\/:*?"<>|]/g, '_')}` } : undefined);
       return;
     }

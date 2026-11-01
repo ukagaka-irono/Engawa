@@ -28,6 +28,7 @@ import { moveTarget, parseMove, type Rect } from './move';
 import { rateOfUse, readProperty, writeProperty, type LogEntry, type PropertyHost, type SoundInfo } from './properties';
 import { addHistory, ghostState, saveSettings, settings, type GhostState } from './settings';
 import { randomWord } from './words';
+import { t } from '../i18n';
 
 export const BASEWARE_NAME = 'Engawa';
 export const BASEWARE_VERSION = '0.1.0-beta';
@@ -586,8 +587,8 @@ export class Ghost implements PlayerHost {
       await shiori.load();
     } catch (e) {
       console.error(`[${this.name}] SHIORI load failed`, e);
-      this.env.log(this, 'error', `SHIORI の読み込みに失敗: ${(e as Error).message}`);
-      shiori = new UnsupportedShiori(`${shiori.name} (読み込み失敗: ${(e as Error).message})`);
+      this.env.log(this, 'error', t('shiori.loadFailed', { error: (e as Error).message }));
+      shiori = new UnsupportedShiori(t('shiori.loadFailedName', { name: shiori.name, error: (e as Error).message }));
     }
     return shiori;
   }
@@ -932,7 +933,7 @@ export class Ghost implements PlayerHost {
     if (status) headers.Status = status;
     try {
       const res = parseResponse(await this.shiori.request(buildRequest({ method, id, references, headers })));
-      const refs = secret ? '(入力は記録しません)' : references.join(', ');
+      const refs = secret ? t('log.inputHidden') : references.join(', ');
       this.env.log(this, 'request', `${method} ${id}${references.length ? ` [${refs}]` : ''}${res.value ? ` → ${res.value}` : ''}`);
       this.reportShioriErrors(id, res.headers);
       return res.value;
@@ -952,13 +953,13 @@ export class Ghost implements PlayerHost {
     if (!levels) return;
     const descriptions = (headers.get('errordescription') ?? '').split('\x01');
     levels.split('\x01').forEach((level, i) => {
-      const text = `${level.trim()}: ${descriptions[i]?.trim() || '(説明なし)'}`;
+      const text = `${level.trim()}: ${descriptions[i]?.trim() || t('log.noDescription')}`;
       if (this.reportedErrors.has(text)) return;
       this.reportedErrors.add(text);
       this.env.log(this, 'error', `${id}: ${text}`);
       if (/^(error|critical)$/i.test(level.trim()) && !this.errorNotified) {
         this.errorNotified = true;
-        this.env.toast(`「${this.name}」の SHIORI がエラーを知らせています (メニューの「ユーティリティ」→「エラーログ」で見られます)`);
+        this.env.toast(t('toast.shioriError', { name: this.name }));
       }
     });
   }
@@ -1752,7 +1753,7 @@ export class Ghost implements PlayerHost {
   }
 
   async communicate(text = ''): Promise<void> {
-    const res = await this.openInput({ title: `「${this.sakuraName}」に話しかける`, kind: 'communicatebox', defaultText: text });
+    const res = await this.openInput({ title: t('input.communicate', { name: this.sakuraName }), kind: 'communicatebox', defaultText: text });
     if ('value' in res) await this.raise('OnCommunicate', ['user', res.value], { kinds: ['communicate'] });
     // ukadoc: 閉じられた場合は cancel (close / timeout は OnUserInputCancel の値)
     else await this.raise('OnCommunicateInputCancel', ['', 'cancel']);
@@ -1761,7 +1762,7 @@ export class Ghost implements PlayerHost {
   /** TeachBox (\![open,teachbox]・\v)。OnTeachStart → OnTeach / OnTeachInputCancel */
   async teach(): Promise<void> {
     await this.raise('OnTeachStart', [], { wait: true });
-    const res = await this.openInput({ title: `「${this.sakuraName}」に教える`, kind: 'teachbox' });
+    const res = await this.openInput({ title: t('input.teach', { name: this.sakuraName }), kind: 'teachbox' });
     if ('value' in res) {
       this.teachHistory.push(res.value);
       await this.raise('OnTeach', this.teachHistory);
@@ -3821,7 +3822,7 @@ export class Ghost implements PlayerHost {
   /** \j・\![open,browser]。http・https・mailto はそのまま、file:/// とゴーストの中のパスはそのファイルを開く */
   openUrl(url: string): void {
     if (this.fromRemote) {
-      this.env.log(this, 'error', `よそのページからの SSTP のスクリプトでは開けません: ${url}`);
+      this.env.log(this, 'error', t('log.remoteOpenBlocked', { url }));
       return;
     }
     if (/^(https?|mailto):/i.test(url)) {

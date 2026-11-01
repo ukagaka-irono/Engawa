@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 export type Bitmap = HTMLCanvasElement;
 
 /**
@@ -34,7 +36,7 @@ export async function decodeImage(data: Uint8Array): Promise<DecodedImage> {
   try {
     await new Promise<void>((resolve, reject) => {
       img.onload = () => resolve();
-      img.onerror = () => reject(new Error('画像を読めませんでした'));
+      img.onerror = () => reject(new Error(t('tools.pictureFailed')));
       img.src = url;
     });
   } finally {

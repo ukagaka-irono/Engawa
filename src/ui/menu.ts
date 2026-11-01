@@ -1,3 +1,4 @@
+import { language } from '../i18n';
 import { el, tokenPx } from './dom';
 import type { MenuSkin } from './menu-skin';
 
@@ -128,10 +129,20 @@ export class ContextMenu {
       check.setAttribute('aria-hidden', 'true');
       const label = el('span', { className: 'menu-label' }, item.label ?? '');
       if (item.key) {
-        // 「…」で終わる項目は SSP と同じく「名前(K)…」の順にする
-        const ellipsis = label.textContent!.endsWith('…');
-        if (ellipsis) label.textContent = label.textContent!.slice(0, -1);
-        label.append('(', el('u', {}, item.key), ellipsis ? ')…' : ')');
+        const text = label.textContent!;
+        // 英語などは、SSP の英語版と同じく名前の中の同じ文字に下線を引く (「&Help」)
+        // (語の頭にあればそこ、無ければ最初に出てくる所)
+        const k = item.key.toLowerCase();
+        const lower = text.toLowerCase();
+        const wordStart = [...lower].findIndex((c, i) => c === k && (i === 0 || !/[a-z0-9]/.test(lower[i - 1])));
+        const at = language().inlineAccessKeys ? (wordStart >= 0 ? wordStart : lower.indexOf(k)) : -1;
+        if (at >= 0) {
+          label.replaceChildren(text.slice(0, at), el('u', {}, text[at]), text.slice(at + 1));
+        } else {
+          // 「…」で終わる項目は SSP と同じく「名前(K)…」の順にする
+          const ellipsis = text.endsWith('…');
+          label.replaceChildren(ellipsis ? text.slice(0, -1) : text, '(', el('u', {}, item.key), ellipsis ? ')…' : ')');
+        }
         btn.dataset.key = item.key.toLowerCase();
         btn.setAttribute('aria-keyshortcuts', item.key);
       }

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { Descript } from '../package/descript';
 import type { SaoriEffect } from '../saori/context';
 import { createShiori } from '../shiori/shiori';
@@ -69,7 +70,7 @@ export class Plugin {
 
   /** 読み込み、version を聞く。動かせなければ理由を返す */
   async load(): Promise<string | undefined> {
-    if (!this.filename) return (this.failed = 'descript.txt に filename がありません');
+    if (!this.filename) return (this.failed = t('plugin.noFilename'));
     // プラグインのフォルダを ghost/master に置いた形にして、SHIORI と同じく動かす
     const tree = new FileTree([...this.files.entries()].map(([p, d]) => [`ghost/master/${p}`, d] as [string, Uint8Array]));
     const shiori = createShiori(tree, Descript.parse(`shiori,${normalizePath(this.filename)}`), {
@@ -86,12 +87,12 @@ export class Plugin {
       // PLUGIN/1.0 (getversion・notify・configure を持つ、何か・SSP の昔のもの。FreeMem など) は、どれも Windows の DLL のまま
       const dll = this.files.get(normalizePath(this.filename));
       const v1 = dll && containsText(dll, 'PLUGIN/1.0') && !containsText(dll, 'request');
-      return (this.failed = v1 ? `${this.filename} は PLUGIN/1.0 の Windows の DLL なので動かせません` : `${this.filename} は Engawa で動かせる形式ではありません`);
+      return (this.failed = t(v1 ? 'plugin.windowsDll' : 'plugin.unsupported', { file: this.filename }));
     }
     try {
       await shiori.load();
     } catch (e) {
-      return (this.failed = `読み込みに失敗しました: ${(e as Error).message}`);
+      return (this.failed = t('plugin.loadFailed', { error: (e as Error).message }));
     }
     this.shiori = shiori;
     this.runnable = true;
@@ -116,7 +117,7 @@ export class Plugin {
         this.hooks.onLog(`${req.id}: ${(e as Error).message}`);
         // 時間切れが続くなら止める (止まったプラグインに、要求を送り続けないように)
         if (++this.failures >= MAX_FAILURES) {
-          this.failed = '続けて答えなかったので止めました';
+          this.failed = t('plugin.stopped');
           this.hooks.onLog(this.failed);
           void this.unload();
         }

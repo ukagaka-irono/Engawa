@@ -46,6 +46,8 @@ export interface Settings {
   voiceRecognition?: boolean;
   /** ゴーストキャッシュ (切り替えたゴーストをしばらく取っておき、戻るときに速く起こす)。既定は使う */
   ghostCache?: boolean;
+  /** 画面の言語 (src/i18n の LANGUAGES の code)。無ければブラウザの言語に合わせる */
+  language?: string;
   running: string[];
   ghosts: Record<string, GhostState>;
   /** ゴースト用の予定表 (\![execute,schedule-add] など。すべてのゴーストで共有) */

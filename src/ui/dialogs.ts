@@ -1,5 +1,6 @@
 /** <dialog> を使った画面部品 (確認・入力ボックス・情報・オプション・パッケージ管理・ヘルプ) と通知。 */
 import dialogPolyfill from 'dialog-polyfill';
+import { language, LANGUAGES, t, type MessageKey } from '../i18n';
 import { el, uniqueId } from './dom';
 import { renderMarkdown } from './markdown';
 
@@ -21,22 +22,23 @@ export function button(label: string, kind: ButtonKind = 'secondary', onClick?: 
 
 export type PackageKindName = 'ghost' | 'balloon' | 'shell' | 'supplement' | 'plugin' | 'headline' | 'calendar skin' | 'calendar plugin' | 'language' | 'package';
 
-const KIND_LABELS: Record<PackageKindName, string> = {
-  ghost: 'ゴースト',
-  balloon: 'バルーン',
-  shell: 'シェル',
-  supplement: '追加ファイル',
-  plugin: 'プラグイン',
-  headline: 'ヘッドライン',
-  'calendar skin': 'カレンダースキン',
-  'calendar plugin': 'スケジュールセンサ',
-  language: '言語',
-  package: 'パッケージ',
+const KIND_LABELS: Record<PackageKindName, MessageKey> = {
+  ghost: 'kind.ghost',
+  balloon: 'kind.balloon',
+  shell: 'kind.shell',
+  supplement: 'kind.supplement',
+  plugin: 'kind.plugin',
+  headline: 'kind.headline',
+  'calendar skin': 'kind.calendarSkin',
+  'calendar plugin': 'kind.calendarPlugin',
+  language: 'kind.language',
+  package: 'kind.package',
 };
 
 /** パッケージの種類の表示名 (インストール結果と管理画面で共有) */
 export function packageKindLabel(kind: PackageKindName | string): string {
-  return KIND_LABELS[kind as PackageKindName] ?? kind;
+  const key = KIND_LABELS[kind as PackageKindName];
+  return key ? t(key) : kind;
 }
 
 interface DialogParts {
@@ -61,13 +63,15 @@ function dialog(className: string, title: string, container: 'div' | 'form' = 'd
   const titleId = uniqueId('dialog-title');
   const root = el('dialog', { className: `dialog ${className}` });
   root.setAttribute('aria-labelledby', titleId);
+  // ページ (README) は日本語のまま。ダイアログは画面の言語で読み上げる
+  root.lang = language().code;
   const frame = el(container, { className: 'dialog-frame' });
   const heading = el('h2', { className: 'dialog-title', id: titleId }, title);
   const titlebar = el('div', { className: 'dialog-titlebar' }, heading);
   const body = el('div', { className: 'dialog-body' });
   const actions = el('div', { className: 'dialog-actions' });
   // × は最後に置いてタイトルバーへ重ねる (開いたときの最初のフォーカスが本文の入力欄やボタンに来るように)
-  const close = button('✕', 'icon', () => root.close(), { ariaLabel: '閉じる' });
+  const close = button('✕', 'icon', () => root.close(), { ariaLabel: t('common.close') });
   close.classList.add('dialog-close');
   close.tabIndex = -1;
   frame.append(titlebar, body, actions, close);
@@ -99,7 +103,7 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
     const { root, body, actions } = dialog('confirm-dialog', opts.title);
     body.appendChild(el('p', { className: 'dialog-text' }, opts.message));
     let answer = false;
-    const cancel = button('キャンセル', 'secondary', () => root.close());
+    const cancel = button(t('common.cancel'), 'secondary', () => root.close());
     const ok = button(opts.confirmLabel, opts.danger ? 'danger' : 'primary', () => {
       answer = true;
       root.close();
@@ -203,7 +207,7 @@ export class InputBox {
       } else if (type === 'ip') {
         const parts = [0, 1, 2, 3].map((i) => {
           const n = el('input', { className: 'text-input ip-part', type: 'number', min: '0', max: '255', value: String(v[i] ?? 0) });
-          n.setAttribute('aria-label', `${i + 1}つ目`);
+          n.setAttribute('aria-label', t('input.ipPart', { n: i + 1 }));
           return n;
         });
         const row = el('div', { className: 'ip-input' });
@@ -252,9 +256,9 @@ export class InputBox {
       });
       root.addEventListener('close', closed);
       if (opts.noClose) root.querySelector('.dialog-close')?.remove();
-      const send = button('送信', 'primary', undefined, { submit: true });
+      const send = button(t('common.send'), 'primary', undefined, { submit: true });
       if (opts.noClose) actions.append(send);
-      else actions.append(button('キャンセル', 'secondary', closed), send);
+      else actions.append(button(t('common.cancel'), 'secondary', closed), send);
       if (opts.timeout && opts.timeout > 0) timer = window.setTimeout(() => finish({ cancelled: 'timeout' }), opts.timeout);
       this.current = { finish };
       root.showModal();
@@ -371,7 +375,7 @@ export class Toasts {
         }
       });
     }
-    toast.appendChild(button('✕', 'icon', remove, { ariaLabel: '閉じる' }));
+    toast.appendChild(button('✕', 'icon', remove, { ariaLabel: t('common.close') }));
     this.box.appendChild(toast);
     if (document.querySelector('dialog[open]')) this.enterTopLayer();
     arm();
@@ -410,7 +414,7 @@ export function showInfo(title: string, sections: { heading: string; rows: InfoR
     }
     body.appendChild(dl);
   }
-  actions.appendChild(button('閉じる', 'primary', () => root.close()));
+  actions.appendChild(button(t('common.close'), 'primary', () => root.close()));
   root.showModal();
 }
 
@@ -428,6 +432,8 @@ export interface OptionsModel {
   acceptRemoteSstp: boolean;
   /** 音声認識で話しかける */
   voiceRecognition: boolean;
+  /** 画面の言語 (LANGUAGES の code)。undefined ならブラウザの言語に合わせる */
+  language: string | undefined;
 }
 
 /** 入力欄の範囲。保存時の丸めにも同じ値を使う */
@@ -442,11 +448,11 @@ const LIMITS = {
  * on.help はページごとの「?」(SSP の設定ダイアログのヘルプ。ゴーストに OnConfigurationDialogHelp で知らせる)。
  * ページの ID は SSP と同じもの (display・dictation・network・setup)
  */
-export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): void; help?(id: string): void }): void {
-  const { root, body, actions } = dialog('options-dialog', 'オプション', 'form');
+export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): void; help?(id: string): void; browserLanguage: string }): void {
+  const { root, body, actions } = dialog('options-dialog', t('options.title'), 'form');
   const form = root.querySelector('form')!;
 
-  const field = (label: string, input: HTMLInputElement, hint?: string) => {
+  const field = (label: string, input: HTMLInputElement | HTMLSelectElement, hint?: string) => {
     input.id = uniqueId('opt');
     const row = el('div', { className: 'field' }, el('label', { htmlFor: input.id }, label), input);
     if (hint) {
@@ -480,7 +486,7 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
   const page = (title: string, id: string) => {
     const h = section(title);
     if (on.help) {
-      const q = button('?', 'icon', () => on.help!(id), { ariaLabel: `「${title}」のヘルプをゴーストに聞く` });
+      const q = button('?', 'icon', () => on.help!(id), { ariaLabel: t('options.help', { title }) });
       q.classList.add('section-help');
       h.appendChild(q);
     }
@@ -492,25 +498,36 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
     type: 'text',
     required: true,
     pattern: '.*\\S.*',
-    title: '空白だけの呼び名にはできません',
+    title: t('options.userNameBlank'),
     value: model.userName,
     autocomplete: 'off',
   });
+  // 言語の名前はその言語で書く (いまの言語が読めなくても選べるように)。空の値はブラウザの言語に合わせる
+  const lang = el(
+    'select',
+    { className: 'text-input' },
+    el('option', { value: '' }, t('options.browserLanguage', { name: on.browserLanguage })),
+    ...LANGUAGES.map((l) => el('option', { value: l.code, lang: l.code }, l.name)),
+  );
+  lang.value = model.language ?? '';
 
   body.append(
-    page('表示', 'display'),
-    field('文字の表示間隔 (ms)', talkWait),
-    field('バルーンのタイムアウト (秒)', balloon, '0 で無効'),
-    field('選択肢のタイムアウト (秒)', choice, '0 で無効'),
-    field('シェルの拡大率 (%)', scale),
-    field('バルーンの拡大率 (%)', balloonScale),
-    page('音声合成・認識', 'dictation'),
-    field('喋った言葉を読み上げる', speech, 'ブラウザの音声合成を使います (\\__v[disable] の所は読みません)'),
-    field('声で話しかける', voice, 'ブラウザの音声認識を使います (Chrome など。マイクの許可が要ります)'),
-    page('連携', 'network'),
-    field('よそのページからの SSTP を受ける', sstp, 'ほかのサイトのページが postMessage で送る SSTP を、ゴーストに渡します。そのスクリプトでは、開く・実行する・ほかのゴーストやイベントを動かすことはできません'),
-    page('ユーザー', 'setup'),
-    field('呼び名', user, 'ゴーストがあなたの呼び名を知らないときに使います'),
+    page(t('options.display'), 'display'),
+    field(t('options.talkWait'), talkWait),
+    field(t('options.balloonTimeout'), balloon, t('options.zeroDisables')),
+    field(t('options.choiceTimeout'), choice, t('options.zeroDisables')),
+    field(t('options.shellScale'), scale),
+    field(t('options.balloonScale'), balloonScale),
+    page(t('options.speech'), 'dictation'),
+    field(t('options.speechOut'), speech, t('options.speechOutHint')),
+    field(t('options.voiceIn'), voice, t('options.voiceInHint')),
+    page(t('options.network'), 'network'),
+    field(t('options.remoteSstp'), sstp, t('options.remoteSstpHint')),
+    page(t('options.user'), 'setup'),
+    field(t('options.userName'), user, t('options.userNameHint')),
+    // SSP の設定ダイアログに言語のページは無いので、ゴーストに聞くヘルプ (?) は付けない
+    section(t('options.language')),
+    field(t('options.languageField'), lang, t('options.languageHint')),
   );
 
   form.addEventListener('submit', (e) => {
@@ -527,13 +544,14 @@ export function showOptions(model: OptionsModel, on: { save(m: OptionsModel): vo
       speech: speech.checked,
       acceptRemoteSstp: sstp.checked,
       voiceRecognition: voice.checked,
+      language: lang.value || undefined,
     };
     // 先に閉じてから保存する (保存の結果はダイアログの外の通知で知らせるため)
     root.close();
     on.save(values);
   });
-  const save = button('保存', 'primary', undefined, { submit: true });
-  actions.append(button('キャンセル', 'secondary', () => root.close()), save);
+  const save = button(t('common.save'), 'primary', undefined, { submit: true });
+  actions.append(button(t('common.cancel'), 'secondary', () => root.close()), save);
   root.showModal();
 }
 
@@ -549,11 +567,11 @@ export interface PackageRow {
  * uninstall は削除できなければ例外を投げ、削除後の片付けで問題があればその説明を返す。
  */
 export function showPackages(packages: PackageRow[], on: { uninstall(row: PackageRow): Promise<string | void> }): void {
-  const { root, body, actions } = dialog('packages-dialog', 'インストール済み');
+  const { root, body, actions } = dialog('packages-dialog', t('packages.title'));
   const status = el('p', { className: 'dialog-status' });
   status.setAttribute('role', 'status');
   const list = el('ul', { className: 'package-list' });
-  const empty = () => el('li', { className: 'package-row' }, 'ありません');
+  const empty = () => el('li', { className: 'package-row' }, t('packages.empty'));
   for (const p of packages) {
     const item = el(
       'li',
@@ -562,14 +580,14 @@ export function showPackages(packages: PackageRow[], on: { uninstall(row: Packag
       el('span', { className: 'package-name' }, p.name),
     );
     if (p.running) {
-      item.appendChild(el('span', { className: 'package-state' }, '起動中'));
+      item.appendChild(el('span', { className: 'package-state' }, t('packages.running')));
     } else {
-      const remove = button('削除', 'danger', undefined, { ariaLabel: `「${p.name}」を削除` });
+      const remove = button(t('common.delete'), 'danger', undefined, { ariaLabel: t('packages.deleteNamed', { name: p.name }) });
       remove.addEventListener('click', async () => {
         const ok = await confirmDialog({
-          title: `「${p.name}」を削除しますか？`,
-          message: p.kind === 'ghost' ? 'セーブデータも一緒に消えます。元に戻せません。' : '元に戻せません。',
-          confirmLabel: '削除',
+          title: t('packages.confirmTitle', { name: p.name }),
+          message: p.kind === 'ghost' ? t('packages.confirmGhost') : t('packages.confirm'),
+          confirmLabel: t('common.delete'),
           danger: true,
         });
         if (!ok) return;
@@ -580,11 +598,11 @@ export function showPackages(packages: PackageRow[], on: { uninstall(row: Packag
           const next = (item.nextElementSibling ?? item.previousElementSibling)?.querySelector('button') ?? close;
           item.remove();
           if (list.childElementCount === 0) list.appendChild(empty());
-          status.textContent = note ? `「${p.name}」を削除しました (${note})` : `「${p.name}」を削除しました`;
+          status.textContent = note ? t('packages.deletedNote', { name: p.name, note }) : t('packages.deleted', { name: p.name });
           next.focus();
         } catch (e) {
           remove.disabled = false;
-          status.textContent = `「${p.name}」を削除できませんでした: ${(e as Error).message}`;
+          status.textContent = t('toast.deleteFailed', { name: p.name, error: (e as Error).message });
           remove.focus();
         }
       });
@@ -594,35 +612,36 @@ export function showPackages(packages: PackageRow[], on: { uninstall(row: Packag
   }
   if (packages.length === 0) list.appendChild(empty());
   body.append(list, status);
-  const close = button('閉じる', 'primary', () => root.close());
+  const close = button(t('common.close'), 'primary', () => root.close());
   actions.appendChild(close);
   root.showModal();
 }
 
 /** ライセンス (組み込んでいる SHIORI とライブラリの著作権表示・条文) */
 export function showLicenses(text: string): void {
-  const { root, body, actions, titleId } = dialog('help-dialog', 'ライセンス');
+  const { root, body, actions, titleId } = dialog('help-dialog', t('licenses.title'));
   body.appendChild(el('pre', { className: 'license-text' }, text));
   // 本文は読むだけなので、キーボードでもスクロールできるようフォーカスを受ける
   body.tabIndex = 0;
   body.setAttribute('role', 'document');
   body.setAttribute('aria-labelledby', titleId);
-  const close = button('閉じる', 'primary', () => root.close());
+  const close = button(t('common.close'), 'primary', () => root.close());
   actions.appendChild(close);
   root.showModal();
   body.scrollTop = 0;
   close.focus();
 }
 
-/** ヘルプ (README を読みやすくしたもの) */
+/** ヘルプ (README を読みやすくしたもの。README は日本語なので、本文は日本語として読み上げる) */
 export function showHelp(markdown: string): void {
-  const { root, body, actions, titleId } = dialog('help-dialog', 'ヘルプ');
+  const { root, body, actions, titleId } = dialog('help-dialog', t('help.title'));
+  body.lang = 'ja';
   body.appendChild(renderMarkdown(markdown));
   // 本文は読むだけなので、キーボードでもスクロールできるようフォーカスを受ける (読み上げではヘルプの本文と分かるように)
   body.tabIndex = 0;
   body.setAttribute('role', 'document');
   body.setAttribute('aria-labelledby', titleId);
-  const close = button('閉じる', 'primary', () => root.close());
+  const close = button(t('common.close'), 'primary', () => root.close());
   actions.appendChild(close);
   root.showModal();
   body.scrollTop = 0;
@@ -645,7 +664,7 @@ export function showText(title: string, text: string, opts: { pre?: boolean; act
       }),
     );
   }
-  const close = button(opts.closeLabel ?? '閉じる', 'primary', () => root.close());
+  const close = button(opts.closeLabel ?? t('common.close'), 'primary', () => root.close());
   actions.appendChild(close);
   root.showModal();
   body.scrollTop = 0;
@@ -656,7 +675,7 @@ export function showText(title: string, text: string, opts: { pre?: boolean; act
 export function showPanel(title: string, content: HTMLElement, onClose?: () => void): { close(): void } {
   const { root, body, actions } = dialog('panel-dialog', title);
   body.appendChild(content);
-  const close = button('閉じる', 'primary', () => root.close());
+  const close = button(t('common.close'), 'primary', () => root.close());
   actions.appendChild(close);
   root.addEventListener('close', () => onClose?.());
   root.showModal();

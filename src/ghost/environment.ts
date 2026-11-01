@@ -1,3 +1,4 @@
+import { language } from '../i18n';
 import { holidayRefs } from '../util/holidays';
 import type { Ghost } from './ghost';
 import { settings } from './settings';
@@ -112,16 +113,17 @@ export class EnvironmentEvents {
   // ---------------------------------------------------------------- 起動時の NOTIFY
 
   async bootNotices(g: Ghost): Promise<void> {
+    // OS のロケール (OnNotifyInternationalInfo・system.os.locale) はブラウザの言語のまま。画面の言語とは別
     const lang = navigator.language || 'ja-JP';
-    // Engawa の画面は日本語だけ。SSP の標準の日本語は、言語名 Japanese・言語 ID 0 で届く
-    // (kotori は Reference0 を content の Japanese / English と照らし合わせる)
-    await g.notify('OnLanguageChange', ['Japanese', '0', '', '']);
+    await g.notify('OnLanguageChange', this.languageRefs());
     const now = new Date();
     const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
     const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
     const dst = now.getTimezoneOffset() < Math.max(jan, jul) ? 1 : 0;
     await g.notify('OnNotifyInternationalInfo', [now.getTimezoneOffset(), dst, lang.split('-')[1] ?? '', lang.split('-')[0]]);
-    const holiday = holidayRefs(now);
+    // SSP は言語フォルダの祝日表から引く。Engawa にあるのは日本の祝日表だけなので、画面が日本語のときだけ送る
+    // (ukadoc: 祝日表から祝日名が取れたときだけ送られる)
+    const holiday = language().code === 'ja' ? holidayRefs(now) : undefined;
     if (holiday) await g.notify('OnNotifyHolidayInfo', holiday);
     await g.notify('OnNotifyFontInfo', availableFonts());
     await g.notify('OnNetworkStatusChange', this.networkRefs());
@@ -133,6 +135,16 @@ export class EnvironmentEvents {
     await g.notify('OnVoiceRecognitionStatus', [this.listening ? 1 : 0]);
     const pads = typeof navigator.getGamepads === 'function' ? [...navigator.getGamepads()].filter((p): p is Gamepad => !!p) : [];
     for (const p of pads) await g.notify('OnGamepadConnected', [p.index]);
+  }
+
+  /**
+   * OnLanguageChange の Reference (言語名・言語 ID・言語のフォルダ・ヘルプの URL)。値は SSP の言語パックの descript.txt と同じ。
+   * SSP に組み込みの日本語は、言語名 Japanese・言語 ID 0・フォルダ無しで届く (kotori は Reference0 を content の Japanese / English と照らし合わせる)。
+   * ほかの言語のフォルダは、ghostpathlist などと同じく仮のパス。ヘルプは Engawa の中 (メニューのヘルプ) にあるので空
+   */
+  languageRefs(): string[] {
+    const l = language();
+    return [l.sspName, String(l.langId), l.folder ? `/language/${l.folder}/` : '', ''];
   }
 
   private networkRefs(): (string | number)[] {

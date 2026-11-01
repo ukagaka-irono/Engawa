@@ -1,4 +1,5 @@
 import { unzipSync } from 'fflate';
+import { t } from '../i18n';
 import { FileTree } from './files';
 
 interface RawName {
@@ -107,7 +108,7 @@ export function filesFromZip(data: Uint8Array): FileTree {
   const entries = unzipSync(data, {
     filter: (f) => {
       total += f.originalSize;
-      if (total > MAX_UNZIPPED) throw new Error(`展開すると ${Math.round(MAX_UNZIPPED / 1024 / 1024)} MB を超えます`);
+      if (total > MAX_UNZIPPED) throw new Error(t('install.tooLarge', { size: Math.round(MAX_UNZIPPED / 1024 / 1024) }));
       return true;
     },
   });

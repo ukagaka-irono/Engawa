@@ -1,4 +1,5 @@
 import { BalloonSkin } from '../balloon/skin';
+import { browserLanguage, language, LANGUAGES, onLanguageChange, setLanguage, t } from '../i18n';
 import { Descript } from '../package/descript';
 import { acceptNamesOf, InstallError, installFiles, type Installed, type InstallResult, type InstallTarget } from '../package/installer';
 import { CharacterLayer } from '../shell/character-layer';
@@ -10,6 +11,7 @@ import { licenseText } from '../ui/licenses';
 import { el } from '../ui/dom';
 import { menuSkin } from '../ui/menu-skin';
 import { ContextMenu, type MenuItem } from '../ui/menu';
+import { translateLayout } from '../ui/layout';
 import { filesFromDirectoryEntry, filesFromFileList, filesFromZip } from '../vfs/archive';
 import type { FileTree } from '../vfs/files';
 import { decodeText } from '../util/text';
@@ -144,6 +146,7 @@ export class GhostManager implements GhostEnv {
       log: (name, text) => this.logPlugin(name, text),
       sstp: (request, key) => this.sstpFromPackage(request, key),
     });
+    onLanguageChange(() => this.languageChanged());
   }
 
   environmentNotices(ghost: Ghost): Promise<void> {
@@ -168,7 +171,7 @@ export class GhostManager implements GhostEnv {
     await this.refreshPackages();
     if (this.options.embedded) return;
     if (!(await isPersistent())) {
-      this.toasts.show('このブラウザでは保存領域が使えないため、インストールしたものや設定はページを閉じると消えます', {
+      this.toasts.show(t('toast.noStorage'), {
         duration: 12_000,
       });
     }
@@ -207,7 +210,7 @@ export class GhostManager implements GhostEnv {
     }
     return p.catch((e) => {
       const name = this.packages.find((m) => m.key === key)?.name ?? key;
-      this.toasts.show(`バルーン「${name}」を読み込めませんでした: ${(e as Error).message} (内蔵バルーンを使います)`, { error: true });
+      this.toasts.show(t('toast.balloonLoadFailed', { name, error: (e as Error).message }), { error: true });
       return BalloonSkin.builtin();
     });
   }
@@ -389,9 +392,9 @@ export class GhostManager implements GhostEnv {
     if (opts.query) {
       await ghost.vanishQuery('selecting');
       const ok = await confirmDialog({
-        title: `「${ghost.name}」を消滅させますか？`,
-        message: 'このゴーストをアンインストールします。セーブデータも一緒に消え、元に戻せません。',
-        confirmLabel: '消滅',
+        title: t('vanish.title', { name: ghost.name }),
+        message: t('vanish.message'),
+        confirmLabel: t('vanish.confirm'),
         danger: true,
       });
       if (!ok) {
@@ -408,7 +411,7 @@ export class GhostManager implements GhostEnv {
     try {
       await deletePackage(meta.key);
     } catch (e) {
-      this.toasts.show(`「${meta.name}」を削除できませんでした: ${(e as Error).message}`, { error: true });
+      this.toasts.show(t('toast.deleteFailed', { name: meta.name, error: (e as Error).message }), { error: true });
     }
     delete settings.ghosts[meta.key];
     settings.running = settings.running.filter((k) => k !== meta.key);
@@ -429,10 +432,9 @@ export class GhostManager implements GhostEnv {
     const summaries: UpdateSummary[] = [];
     let restart = false;
     for (const raw of opts.targets) {
-      const t = raw.trim().toLowerCase();
       // --balloon=名前・--shell=名前 (\![updateother]) は、その名前のものを
       const named = /^--(balloon|shell)=(.*)$/i.exec(raw.trim());
-      const kind = named ? named[1].toLowerCase() : t;
+      const kind = named ? named[1].toLowerCase() : raw.trim().toLowerCase();
       let homeurl: string;
       let files: FileTree;
       let key = ghost.key;
@@ -458,7 +460,7 @@ export class GhostManager implements GhostEnv {
         homeurl = Descript.read(files, 'descript.txt').str('homeurl');
       } else continue;
       if (!homeurl) {
-        this.toasts.show(`「${name}」には更新の取得先 (homeurl) がありません`);
+        this.toasts.show(t('toast.noHomeurl', { name }));
         summaries.push({ name, target: kind, result: { ok: false, changed: [], reason: '404' } });
         continue;
       }
@@ -474,7 +476,7 @@ export class GhostManager implements GhostEnv {
       );
       summaries.push({ name, target: kind, result: res });
       if (!res.ok && res.reason === 'fetch') {
-        this.toasts.show(`更新を取得できませんでした: ${homeurl} がブラウザからの取得を許していない (CORS) か、つながりません`, { error: true });
+        this.toasts.show(t('toast.updateFetchFailed', { url: homeurl }), { error: true });
       }
       if (res.ok && res.changed.length && !opts.checkOnly && !opts.testOnly) {
         if (kind === 'balloon') {
@@ -517,9 +519,9 @@ export class GhostManager implements GhostEnv {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = new Uint8Array(await res.arrayBuffer());
       } catch (e) {
-        const reason = (e as Error).message === 'Failed to fetch' ? 'CORS かネットワークのため取得できません' : (e as Error).message;
+        const reason = (e as Error).message === 'Failed to fetch' ? t('toast.corsOrNetwork') : (e as Error).message;
         void ghost.raise('OnURLDropFailure', ['', reason, url, 0]);
-        this.toasts.show(`「${url}」を取得できませんでした: ${reason}`, { error: true });
+        this.toasts.show(t('toast.downloadFailed', { url, error: reason }), { error: true });
         return;
       }
       const last = new URL(url).pathname.split('/').pop() || 'download.nar';
@@ -536,7 +538,7 @@ export class GhostManager implements GhostEnv {
     const path = url.replace(/^file:\/\/\/?/i, '');
     const data = ghost.files.get(path) ?? ghost.files.get(`ghost/master/${path}`);
     if (data) await this.install(() => filesFromZip(data), path.split('/').pop() ?? path);
-    else this.toasts.show(`「${url}」が見つかりません`, { error: true });
+    else this.toasts.show(t('toast.notFound', { name: url }), { error: true });
   }
 
   lastInstalled(kind: 'ghost' | 'balloon' | 'shell'): string | undefined {
@@ -580,7 +582,7 @@ export class GhostManager implements GhostEnv {
     const name = params.get('ghost') ?? '';
     const g = this.ghosts.find((x) => x.alive && !x.leaving && (x.name === name || x.sakuraName === name));
     if (!g) {
-      this.toasts.show(`x-ukagaka-link の宛先「${name}」は起動していません`);
+      this.toasts.show(t('toast.linkNotRunning', { name }));
       return false;
     }
     void g.raise('OnXUkagakaLinkOpen', [params.get('info') ?? ''], { headers: { SecurityLevel: 'external' }, kinds: ['remote'] });
@@ -628,7 +630,7 @@ export class GhostManager implements GhostEnv {
       return undefined;
     } catch (e) {
       const reason = (e as Error).message;
-      if (!quiet) this.toasts.show(`保存領域を開けませんでした: ${reason}`, { error: true });
+      if (!quiet) this.toasts.show(t('toast.storageFailed', { error: reason }), { error: true });
       return reason;
     }
   }
@@ -652,7 +654,7 @@ export class GhostManager implements GhostEnv {
       await this.refreshPackages();
     } catch (e) {
       console.warn('[engawa] sample ghost', e);
-      this.toasts.show(`サンプルゴーストを用意できませんでした: ${(e as Error).message}`, { error: true });
+      this.toasts.show(t('toast.sampleFailed', { error: (e as Error).message }), { error: true });
     }
   }
 
@@ -732,8 +734,8 @@ export class GhostManager implements GhostEnv {
     } catch (e) {
       console.error(e);
       // 切り替えの途中なら、利用者から見れば切り替えの失敗
-      const what = mode.kind === 'changed' ? `「${meta.name}」に切り替えられませんでした` : `「${meta.name}」を起動できませんでした`;
-      this.toasts.show(`${what}: ${(e as Error).message}`, { error: true });
+      const params = { name: meta.name, error: (e as Error).message };
+      this.toasts.show(mode.kind === 'changed' ? t('toast.changeFailed', params) : t('toast.bootFailed', params), { error: true });
       // 途中まで起動したゴーストを残さない
       // 起動しきっていないので、ほかのゴーストには何も知らせない
       await ghost?.destroy({ failedBoot: true }).catch((err) => console.warn('[engawa] cleanup after failed boot', err));
@@ -761,7 +763,7 @@ export class GhostManager implements GhostEnv {
       // 切り替え先が起動できなかったら、前のゴーストは終わっただけなので、ほかのゴーストにそう知らせる
       if (!booted) this.announceClosed(fromId, from.lastScript, fromShell);
     } catch (e) {
-      this.toasts.show(`「${meta.name}」に切り替えられませんでした: ${(e as Error).message}`, { error: true });
+      this.toasts.show(t('toast.changeFailed', { name: meta.name, error: (e as Error).message }), { error: true });
     } finally {
       this.booting.delete(meta.key);
     }
@@ -785,10 +787,14 @@ export class GhostManager implements GhostEnv {
     this.emptyState.hidden = !show;
     if (!show) return;
     const next = this.defaultGhosts();
-    this.emptyState.querySelector('.empty-title')!.textContent = next.length ? 'ゴーストが起動していません' : 'ゴーストがインストールされていません';
+    this.emptyState.querySelector('.empty-title')!.textContent = next.length ? t('layout.noGhostRunning') : t('layout.noGhostInstalled');
     // ボタンは作り直さない。表示と動作だけを今の状態に合わせる (前回複数起動していたら全部起動する)
     this.emptyButton.textContent =
-      next.length > 1 ? `「${next[0].name}」ほか${next.length - 1}体を起動` : next.length ? `「${next[0].name}」を起動` : 'ファイルからインストール…';
+      next.length > 1
+        ? t('layout.bootMany', { name: next[0].name, count: next.length - 1 })
+        : next.length
+          ? t('layout.bootOne', { name: next[0].name })
+          : t('layout.installFromFile');
     this.emptyAction = next.length ? () => void this.bootFromEmptyState() : () => this.pickFiles(false);
   }
 
@@ -844,7 +850,7 @@ export class GhostManager implements GhostEnv {
         tree = await source();
       } catch (e) {
         console.warn('[engawa] extraction', e);
-        throw new InstallError('.nar / .zip として読めないファイルです', 'extraction');
+        throw new InstallError(t('install.unreadable'), 'extraction');
       }
       result = await installFiles(tree, name, () => this.installTargets(), focused?.key);
     } catch (e) {
@@ -858,7 +864,7 @@ export class GhostManager implements GhostEnv {
       } else {
         void ghost?.raise('OnInstallFailure', [e instanceof InstallError ? e.reason : 'extraction', msg]);
       }
-      this.toasts.show(`「${name}」をインストールできませんでした: ${msg}`, { error: true });
+      this.toasts.show(t('install.failed', { name, error: msg }), { error: true });
       return undefined;
     }
     await this.refreshPackages();
@@ -898,25 +904,25 @@ export class GhostManager implements GhostEnv {
     if (result.type === 'ghost') {
       const meta = this.packages.find((p) => p.key === result.key);
       if (meta && !this.isActive(meta.key)) {
-        if (ghost) actions.push({ label: '切り替え', run: () => void this.switchGhost(ghost, meta) });
+        if (ghost) actions.push({ label: t('install.switch'), run: () => void this.switchGhost(ghost, meta) });
         actions.push({
-          label: ghost ? '呼ぶ' : '起動',
+          label: ghost ? t('install.call') : t('install.boot'),
           run: () => void this.boot(meta, ghost ? { kind: 'called', from: ghost.identity } : { kind: 'boot' }),
         });
       }
     } else if (result.type === 'balloon' && ghost) {
-      actions.push({ label: '切り替え', run: () => void ghost.changeBalloon(result.key) });
+      actions.push({ label: t('install.switch'), run: () => void ghost.changeBalloon(result.key) });
     } else if ((result.type === 'shell' || result.type === 'supplement') && target) {
       // 起動中のゴーストはファイルの読み直しが必要
-      actions.push({ label: '再起動', run: () => void this.restart(target) });
+      actions.push({ label: t('install.restart'), run: () => void this.restart(target) });
     }
     // 中に readme.txt があれば読めるようにする
     const readme = result.type === 'ghost' || result.type === 'balloon' ? await readPackageFile(result.key, 'readme.txt').catch(() => undefined) : undefined;
     if (readme) actions.push({ label: 'readme', run: () => showText(`${result.name} - readme`, decodeText(readme)) });
     const where = this.packages.find((p) => p.key === result.key)?.name;
     const message = result.rerouted
-      ? `${packageKindLabel(result.type)}「${result.name}」を「${where ?? result.accept}」にインストールしました`
-      : `${packageKindLabel(result.type)}「${result.name}」をインストールしました`;
+      ? t('install.doneTo', { kind: packageKindLabel(result.type), name: result.name, target: where ?? result.accept ?? '' })
+      : t('install.done', { kind: packageKindLabel(result.type), name: result.name });
     if (!opts.quiet && (!played || actions.length || result.rerouted)) this.toasts.show(message, { actions });
     return result;
   }
@@ -944,7 +950,7 @@ export class GhostManager implements GhostEnv {
       // 再起動はほかのゴーストから見て終了ではないので知らせない
       await ghost.destroy({ silent: true, reload });
     } catch (e) {
-      this.toasts.show(`「${meta.name}」を再起動できませんでした: ${(e as Error).message}`, { error: true });
+      this.toasts.show(t('toast.restartFailed', { name: meta.name, error: (e as Error).message }), { error: true });
       return;
     }
     await this.refreshPackages();
@@ -1075,7 +1081,7 @@ export class GhostManager implements GhostEnv {
 
   /** .nar / .zip でもフォルダでもないもの。インストールは始めず、ゴーストには知らせず、通知だけ出す */
   private rejectNonArchive(name: string): void {
-    this.toasts.show(`「${name}」をインストールできませんでした: .nar / .zip ファイルかフォルダではありません`, { error: true });
+    this.toasts.show(t('install.failed', { name, error: t('install.notArchive') }), { error: true });
   }
 
   // ---------------------------------------------------------------- メニュー
@@ -1088,7 +1094,7 @@ export class GhostManager implements GhostEnv {
 
     if (g?.isMinimized) {
       // 最小化しているときは戻すことだけ (ほかの操作は戻してから)
-      items.push({ label: `「${g.name}」を元に戻す`, key: 'R', action: () => g.restore('user') }, { separator: true });
+      items.push({ label: t('menu.restore', { name: g.name }), key: 'R', action: () => g.restore('user') }, { separator: true });
     } else if (g) {
       const [recommend, portal, keroRecommend] = await Promise.all([g.sites('sakura.recommendsites'), g.sites('sakura.portalsites'), g.sites('kero.recommendsites')]);
       // メニューの名前・表示は SHIORI のリソースで変えられる (&X はショートカット)
@@ -1096,13 +1102,13 @@ export class GhostManager implements GhostEnv {
       const visible = async (id: string): Promise<boolean> => (await g.resource(id)) !== '0';
       const siteItems = (sites: typeof recommend, kind: 'recommend' | 'portal', scope: number): MenuItem[] =>
         sites.map((s, i) => (s.title === '-' ? { separator: true } : { label: s.title, action: () => void g.chooseSite(s, kind, scope, i) }));
-      if (portal.length) items.push({ label: await caption('sakura.portalbuttoncaption', 'ポータル'), key: 'P', submenu: siteItems(portal, 'portal', 0) });
-      if (recommend.length) items.push({ label: await caption('sakura.recommendbuttoncaption', 'おすすめ'), key: 'R', submenu: siteItems(recommend, 'recommend', 0) });
-      if (keroRecommend.length) items.push({ label: await caption('kero.recommendbuttoncaption', `${g.keroName || '相方'}のおすすめ`), key: 'K', submenu: siteItems(keroRecommend, 'recommend', 1) });
+      if (portal.length) items.push({ label: await caption('sakura.portalbuttoncaption', t('menu.portal')), key: 'P', submenu: siteItems(portal, 'portal', 0) });
+      if (recommend.length) items.push({ label: await caption('sakura.recommendbuttoncaption', t('menu.recommend')), key: 'R', submenu: siteItems(recommend, 'recommend', 0) });
+      if (keroRecommend.length) items.push({ label: await caption('kero.recommendbuttoncaption', t('menu.keroRecommend', { name: g.keroName || t('menu.partner') })), key: 'K', submenu: siteItems(keroRecommend, 'recommend', 1) });
       if (items.length) items.push({ separator: true });
 
       items.push({
-        label: 'ゴースト切り替え',
+        label: t('menu.changeGhost'),
         key: 'G',
         submenu: ghosts.map(
           (p): MenuItem => ({
@@ -1115,7 +1121,7 @@ export class GhostManager implements GhostEnv {
         ),
       });
       items.push({
-        label: '他のゴーストを呼ぶ',
+        label: t('menu.callGhost'),
         key: 'C',
         submenu: ghosts.map(
           (p): MenuItem => ({
@@ -1126,7 +1132,7 @@ export class GhostManager implements GhostEnv {
         ),
       });
       items.push({
-        label: 'シェル',
+        label: t('menu.shell'),
         key: 'S',
         // \![set,property,currentghost.shelllist(…).menu,hidden] で隠したシェルは出さない (今のシェルは出す)
         submenu: g.shellDirs.filter((d, i) => d === g.shell.dir || g.property(`currentghost.shelllist.index(${i}).menu`) !== 'hidden').map(
@@ -1147,56 +1153,56 @@ export class GhostManager implements GhostEnv {
           dress.push({ label: `${b.category} / ${b.part}`, check: 'checkbox', checked: b.enabled, action: () => g.setDressup(scope, b.id) });
         }
       }
-      items.push({ label: '着せ替え', key: 'D', submenu: dress });
+      items.push({ label: t('menu.dressup'), key: 'D', submenu: dress });
       items.push({
-        label: 'バルーン',
+        label: t('menu.balloon'),
         key: 'B',
         submenu: [
-          { label: '内蔵バルーン', check: 'radio', checked: g.skin.key === null, action: () => void g.changeBalloon(null) },
+          { label: t('menu.builtinBalloon'), check: 'radio', checked: g.skin.key === null, action: () => void g.changeBalloon(null) },
           ...balloons.map(
             (b): MenuItem => ({ label: b.name, check: 'radio', checked: g.skin.key === b.key, action: () => void g.changeBalloon(b.key) }),
           ),
         ],
       });
-      items.push({ separator: true }, { label: '話しかける…', key: 'T', action: () => void g.communicate() }, { label: '教える…', key: 'E', action: () => void g.teach() });
+      items.push({ separator: true }, { label: t('menu.communicate'), key: 'T', action: () => void g.communicate() }, { label: t('menu.teach'), key: 'E', action: () => void g.teach() });
       const history = (settings.history?.ghost ?? []).map((k) => this.packages.find((p) => p.key === k)).filter((p): p is PackageMeta => !!p && p.key !== g.key);
       if (history.length) {
         items.push({
-          label: '最近使ったゴースト',
+          label: t('menu.recentGhosts'),
           key: 'Y',
           submenu: history.map((p): MenuItem => ({ label: p.name, disabled: this.isActive(p.key), action: () => void this.switchGhost(g, p) })),
         });
       }
       items.push({ separator: true });
       items.push({
-        label: 'ユーティリティ',
+        label: t('menu.utilities'),
         key: 'U',
         submenu: [
-          { label: '位置のリセット', key: 'P', action: () => void g.requestResetPositions() },
-          { label: 'バルーン位置のリセット', key: 'B', action: () => g.resetBalloonPositions() },
-          { label: '最小化', key: 'M', disabled: g.passive, action: () => g.minimize('user') },
+          { label: t('menu.resetPosition'), key: 'P', action: () => void g.requestResetPositions() },
+          { label: t('menu.resetBalloonPosition'), key: 'B', action: () => g.resetBalloonPositions() },
+          { label: t('menu.minimize'), key: 'M', disabled: g.passive, action: () => g.minimize('user') },
           { separator: true },
-          { label: '使用率…', key: 'U', action: () => this.openTool(g, 'rateofusegraph', []) },
-          { label: 'AI グラフ…', key: 'A', action: () => this.openTool(g, 'aigraph', []) },
+          { label: t('menu.usage'), key: 'U', action: () => this.openTool(g, 'rateofusegraph', []) },
+          { label: t('menu.aiGraph'), key: 'A', action: () => this.openTool(g, 'aigraph', []) },
           { separator: true },
-          { label: '開発用パレット…', key: 'D', action: () => this.openTool(g, 'developer', []) },
-          { label: 'サーフェステスト…', key: 'S', action: () => this.openTool(g, 'surfacetest', []) },
-          { label: 'スクリプトログ…', key: 'L', action: () => this.openTool(g, 'backlogviewer', []) },
-          { label: 'エラーログ…', key: 'E', action: () => this.openTool(g, 'errorlog', []) },
-          { label: 'SHIORI リクエスト…', key: 'R', action: () => this.openTool(g, 'shiorirequest', []) },
-          { label: 'スクリプトを送る…', key: 'I', action: () => this.openTool(g, 'sendbox', []) },
+          { label: t('menu.developer'), key: 'D', action: () => this.openTool(g, 'developer', []) },
+          { label: t('menu.surfaceTest'), key: 'S', action: () => this.openTool(g, 'surfacetest', []) },
+          { label: t('menu.scriptLog'), key: 'L', action: () => this.openTool(g, 'backlogviewer', []) },
+          { label: t('menu.errorLog'), key: 'E', action: () => this.openTool(g, 'errorlog', []) },
+          { label: t('menu.shioriRequest'), key: 'R', action: () => this.openTool(g, 'shiorirequest', []) },
+          { label: t('menu.sendScript'), key: 'I', action: () => this.openTool(g, 'sendbox', []) },
         ],
       });
       if (g.descript.str('homeurl')) {
-        items.push({ label: await caption('updatebuttoncaption', 'ネットワーク更新'), key: 'N', action: () => void this.update(g, { targets: ['ghost'], reason: 'manual' }) });
+        items.push({ label: await caption('updatebuttoncaption', t('menu.networkUpdate')), key: 'N', action: () => void this.update(g, { targets: ['ghost'], reason: 'manual' }) });
       }
-      if (hasReadme(g) && (await visible('readmebutton.visible'))) items.push({ label: await caption('readmebuttoncaption', 'Readme…'), key: 'M', action: () => this.openTool(g, 'readme', []) });
+      if (hasReadme(g) && (await visible('readmebutton.visible'))) items.push({ label: await caption('readmebuttoncaption', t('menu.readme')), key: 'M', action: () => this.openTool(g, 'readme', []) });
       if (!g.passive && (await visible('vanishbuttonvisible'))) {
-        items.push({ label: await caption('vanishbuttoncaption', '消滅指示…'), key: 'V', action: () => void this.vanish(g, { query: true }) });
+        items.push({ label: await caption('vanishbuttoncaption', t('menu.vanish')), key: 'V', action: () => void this.vanish(g, { query: true }) });
       }
     } else {
       items.push({
-        label: 'ゴーストを起動',
+        label: t('menu.bootGhost'),
         key: 'G',
         submenu: ghosts.map((p): MenuItem => ({ label: p.name, disabled: this.isActive(p.key), action: () => void this.boot(p, { kind: 'boot' }) })),
       });
@@ -1207,30 +1213,31 @@ export class GhostManager implements GhostEnv {
     const plugins = this.plugins.list();
     if (plugins.length) {
       items.push({
-        label: 'プラグイン',
+        label: t('menu.plugins'),
         key: 'J',
-        submenu: plugins.map((p): MenuItem => ({ label: p.failed ? `${p.name} (動かせません)` : p.name, disabled: !p.runnable, action: () => this.plugins.menuExec(p, g) })),
+        submenu: plugins.map((p): MenuItem => ({ label: p.failed ? t('menu.pluginFailed', { name: p.name }) : p.name, disabled: !p.runnable, action: () => this.plugins.menuExec(p, g) })),
       });
       items.push({ separator: true });
     }
     items.push({
-      label: 'インストール',
+      label: t('menu.install'),
       key: 'I',
       submenu: [
-        { label: 'ファイルからインストール…', key: 'F', action: () => this.pickFiles(false) },
-        { label: 'フォルダからインストール…', key: 'D', action: () => this.pickFiles(true) },
+        { label: t('menu.installFile'), key: 'F', action: () => this.pickFiles(false) },
+        { label: t('menu.installFolder'), key: 'D', action: () => this.pickFiles(true) },
         { separator: true },
-        { label: 'インストール済み…', key: 'L', action: () => this.openPackages() },
+        { label: t('menu.installed'), key: 'L', action: () => this.openPackages() },
       ],
     });
-    items.push({ label: 'オプション…', key: 'O', action: () => this.openOptions() });
+    items.push({ label: t('menu.options'), key: 'O', action: () => this.openOptions() });
+    items.push(this.languageMenu());
     items.push({ separator: true });
-    items.push({ label: 'ヘルプ…', key: 'H', action: () => showHelp(README) });
-    items.push({ label: 'ライセンス…', key: 'L', action: () => showLicenses(licenseText()) });
-    items.push({ label: '情報…', key: 'A', action: () => this.openInfo(g) });
+    items.push({ label: t('menu.help'), key: 'H', action: () => showHelp(README) });
+    items.push({ label: t('menu.licenses'), key: 'L', action: () => showLicenses(licenseText()) });
+    items.push({ label: t('menu.about'), key: 'A', action: () => this.openInfo(g) });
     if (g || this.ghosts.length > 1) items.push({ separator: true });
-    if (g) items.push({ label: `「${g.name}」を閉じる`, key: 'X', disabled: g.passive, action: () => void this.closeGhost(g) });
-    if (this.ghosts.length > 1) items.push({ label: 'すべて閉じる', key: 'Q', action: () => void this.closeAll() });
+    if (g) items.push({ label: t('menu.close', { name: g.name }), key: 'X', disabled: g.passive, action: () => void this.closeGhost(g) });
+    if (this.ghosts.length > 1) items.push({ label: t('menu.closeAll'), key: 'Q', action: () => void this.closeAll() });
     return items;
   }
 
@@ -1238,7 +1245,7 @@ export class GhostManager implements GhostEnv {
     try {
       await ghost.close('user', all);
     } catch (e) {
-      this.toasts.show(`「${ghost.name}」を閉じられませんでした: ${(e as Error).message}`, { error: true });
+      this.toasts.show(t('toast.closeFailed', { name: ghost.name, error: (e as Error).message }), { error: true });
     }
   }
 
@@ -1263,8 +1270,10 @@ export class GhostManager implements GhostEnv {
         speech: settings.speech,
         acceptRemoteSstp: settings.acceptRemoteSstp,
         voiceRecognition: settings.voiceRecognition ?? false,
+        language: settings.language,
       },
       {
+        browserLanguage: browserLanguage().name,
         help: (id) => {
           const g = this.current?.alive ? this.current : undefined;
           if (g) void g.raise('OnConfigurationDialogHelp', [id]);
@@ -1276,6 +1285,8 @@ export class GhostManager implements GhostEnv {
           const balloon = m.balloonScale !== settings.balloonScale ? { before: settings.balloonScale, after: m.balloonScale } : undefined;
           const user = m.userName !== settings.userName;
           Object.assign(settings, m);
+          // 選んだ言語が今と違えば、画面を作り直してゴーストに知らせる (languageChanged)
+          setLanguage(settings.language);
           for (const g of this.ghosts) {
             g.scalingChanged(shell, balloon);
             if (user) void g.notify('OnNotifyUserInfo', [m.userName, m.userName, '', 'undef']);
@@ -1283,11 +1294,41 @@ export class GhostManager implements GhostEnv {
           if (speechChanged) this.environment.speechChanged();
           if (voiceChanged) this.environment.setVoiceRecognition(m.voiceRecognition);
           if (!saveSettingsNow()) {
-            this.toasts.show('設定を保存できませんでした: このブラウザの保存領域が使えません (このページを開いている間だけ有効です)', { error: true });
+            this.toasts.show(t('toast.settingsNotSaved'), { error: true });
           }
         },
       },
     );
+  }
+
+  /**
+   * 言語のメニュー (SSP の「Language」)。どの言語の画面からも見つけられるよう、項目名に英語の Language を添え、
+   * 言語はその言語で書いた名前で並べる。最後の項目はブラウザの言語に合わせる (SSP の「Use system lang.」)
+   */
+  private languageMenu(): MenuItem {
+    const now = language();
+    return {
+      label: t('menu.language'),
+      submenu: [
+        ...LANGUAGES.map((l): MenuItem => ({ label: l.name, check: 'radio', checked: l === now, action: () => this.changeLanguage(l.code) })),
+        { separator: true },
+        { label: t('menu.useBrowserLanguage'), check: 'checkbox', checked: settings.language === undefined, action: () => this.changeLanguage(undefined) },
+      ],
+    };
+  }
+
+  /** 画面の言語を変えて保存する (undefined ならブラウザの言語に合わせる) */
+  private changeLanguage(code: string | undefined): void {
+    settings.language = code;
+    setLanguage(code);
+    if (!saveSettingsNow()) this.toasts.show(t('toast.settingsNotSaved'), { error: true });
+  }
+
+  /** 言語が変わった。骨組みの文字を入れ直し、ゴーストに OnLanguageChange を送る (メニューとダイアログは開くたびに作る) */
+  private languageChanged(): void {
+    translateLayout(this.overlay);
+    this.updateEmptyState();
+    for (const g of this.ghosts) if (g.alive && !g.leaving) void g.raise('OnLanguageChange', this.environment.languageRefs());
   }
 
   private openPackages(): void {
@@ -1306,7 +1347,7 @@ export class GhostManager implements GhostEnv {
           // 削除はできている。一覧の読み直しに失敗したら、ダイアログの中で一緒に知らせる
           const failed = await this.refreshPackages(true);
           this.updateEmptyState();
-          return failed ? `一覧を更新できませんでした: ${failed}` : undefined;
+          return failed ? t('packages.refreshFailed', { error: failed }) : undefined;
         },
       },
     );
@@ -1318,33 +1359,33 @@ export class GhostManager implements GhostEnv {
       const d = ghost.descript;
       const homeurl = d.str('homeurl');
       sections.push({
-        heading: 'ゴースト',
+        heading: t('info.ghost'),
         rows: [
-          { label: '名前', value: ghost.name },
-          { label: 'キャラクター', value: [ghost.sakuraName, ghost.keroName].filter(Boolean).join(' / ') },
-          { label: '作者', value: d.str('craftmanw', d.str('craftman')) },
-          { label: 'ホームページ', value: homeurl, href: /^https?:/.test(homeurl) ? homeurl : undefined },
+          { label: t('info.name'), value: ghost.name },
+          { label: t('info.characters'), value: [ghost.sakuraName, ghost.keroName].filter(Boolean).join(' / ') },
+          { label: t('info.author'), value: d.str('craftmanw', d.str('craftman')) },
+          { label: t('info.homepage'), value: homeurl, href: /^https?:/.test(homeurl) ? homeurl : undefined },
           { label: 'SHIORI', value: d.str('shiori', 'shiori.dll') },
         ],
       });
       const sd = ghost.shell.descript;
       sections.push({
-        heading: 'シェル',
+        heading: t('info.shell'),
         rows: [
-          { label: '名前', value: ghost.shell.name },
-          { label: '作者', value: sd.str('craftmanw', sd.str('craftman')) },
+          { label: t('info.name'), value: ghost.shell.name },
+          { label: t('info.author'), value: sd.str('craftmanw', sd.str('craftman')) },
         ],
       });
-      sections.push({ heading: 'バルーン', rows: [{ label: '名前', value: ghost.skin.name }] });
+      sections.push({ heading: t('info.balloon'), rows: [{ label: t('info.name'), value: ghost.skin.key === null ? t('menu.builtinBalloon') : ghost.skin.name }] });
     }
     sections.push({
-      heading: 'ベースウェア',
+      heading: t('info.baseware'),
       rows: [
-        { label: '名前', value: BASEWARE_NAME },
-        { label: 'バージョン', value: BASEWARE_VERSION },
+        { label: t('info.name'), value: BASEWARE_NAME },
+        { label: t('info.version'), value: BASEWARE_VERSION },
       ],
     });
-    showInfo('情報', sections);
+    showInfo(t('info.title'), sections);
   }
 
   // ---------------------------------------------------------------- 全体のイベント

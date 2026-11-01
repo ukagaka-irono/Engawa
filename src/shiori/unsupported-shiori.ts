@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { parseRequestId } from './request-id';
 import type { Shiori } from './shiori';
 
@@ -12,9 +13,7 @@ export class UnsupportedShiori implements Shiori {
   async request(text: string): Promise<string> {
     const id = parseRequestId(text);
     if (id === 'OnBoot' || id === 'OnFirstBoot' || id === 'OnGhostChanged' || id === 'OnGhostCalled') {
-      const script =
-        `\\0\\s[0]\\_q[Engawa] このゴーストの SHIORI「${this.name.replace(/[\\\]]/g, '')}」はブラウザでは実行できないため、` +
-        'シェルの表示のみ行います。\\n\\n右クリックでメニューを開けます。\\e';
+      const script = `\\0\\s[0]\\_q[Engawa] ${t('shiori.unsupported', { name: this.name.replace(/[\\\]]/g, '') })}\\e`;
       return `SHIORI/3.0 200 OK\r\nCharset: UTF-8\r\nValue: ${script}\r\n\r\n`;
     }
     return 'SHIORI/3.0 204 No Content\r\nCharset: UTF-8\r\n\r\n';
